@@ -8,6 +8,51 @@
         body { margin: 0; overflow: hidden; background-color: #87CEEB; touch-action: none; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         canvas { display: block; position: absolute; top: 0; left: 0; }
         
+        #lobby-ui {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            text-align: center;
+        }
+        #qr-container {
+            background: white;
+            padding: 10px;
+            border-radius: 10px;
+            margin: 10px;
+        }
+        #qr-container canvas {
+            position: relative !important; /* Override absolute */
+        }
+        .player-list {
+            display: flex;
+            gap: 10px;
+            margin: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .player-badge {
+            background: #fff;
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .mode-toggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: 1px solid white;
+            padding: 8px;
+            border-radius: 8px;
+            pointer-events: auto;
+            cursor: pointer;
+            display: none; /* Hidden by default, shown on client */
+        }
+        
         /* P5 Diamond Canvas */
         #c-p5 {
             pointer-events: none;
@@ -121,7 +166,9 @@
             "three": "https://esm.sh/three@0.160.0",
             "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/",
             "nipplejs": "https://esm.sh/nipplejs@0.10.1",
-            "simplex-noise": "https://esm.sh/simplex-noise@4.0.1"
+            "simplex-noise": "https://esm.sh/simplex-noise@4.0.1",
+            "peerjs": "https://esm.sh/peerjs@1.5.2",
+            "qrcode": "https://esm.sh/qrcode@1.5.3"
         }
     }
     </script>
@@ -129,31 +176,37 @@
 <body>
     <div id="start-overlay">
         <h1>Farm Friends</h1>
-        <p>Select Number of Players</p>
-        <div class="btn-group" id="player-select">
-            <button data-players="1">1</button>
-            <button data-players="2" class="selected">2</button>
-            <button data-players="3">3</button>
-            <button data-players="4">4</button>
-            <button data-players="5">5</button>
+        
+        <!-- Main Menu -->
+        <div id="main-menu">
+            <button id="btn-host">Host Game</button>
+            <br><br>
+            <p>-- OR --</p>
+            <br>
+            <div id="join-status">Scan Host QR Code to Join</div>
         </div>
-        <br>
-        <div class="controls-info">
-            <div class="p-card" style="border-bottom: 5px solid #ff4444;">
-                <h3 style="color: #d32f2f;">P1</h3>
-                <div>WASD</div>
+
+        <!-- Host Lobby -->
+        <div id="lobby-ui">
+            <h3>Lobby</h3>
+            <div id="qr-container"></div>
+            <p>Scan to Join</p>
+            <div class="player-list" id="lobby-players">
+                <div class="player-badge" style="border-bottom: 4px solid #ff4444">P1 (Host)</div>
             </div>
-            <div class="p-card" style="border-bottom: 5px solid #4444ff;">
-                <h3 style="color: #1976d2;">P2</h3>
-                <div>YGHJ</div>
-            </div>
-            <div class="p-card" style="border-bottom: 5px solid #44ff44;">
-                <h3 style="color: #2e7d32;">P3-5</h3>
-                <div>Gamepads</div>
-            </div>
+            <button id="btn-start-game">Start Game</button>
         </div>
-        <button id="start-btn">Start Farming</button>
+        
+        <!-- Client Waiting -->
+        <div id="client-wait" style="display:none;">
+            <h2>Connected!</h2>
+            <p>Waiting for host to start...</p>
+            <div class="player-badge" id="my-player-badge">...</div>
+        </div>
+
     </div>
+
+    <button id="view-toggle" class="mode-toggle">Switch to Controller Mode</button>
 
     <!-- Main canvas for P1-P4 -->
     <!-- Created by ThreeJS logic usually, but we want strict control if we have 2 canvases -->

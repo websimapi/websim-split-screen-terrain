@@ -1,60 +1,133 @@
 import * as THREE from 'three';
 import { InputManager } from './input.js';
 import { TerrainManager } from './terrain.js';
+import { NetworkManager } from './network.js';
+import QRCode from 'qrcode';
 
 // --- Configuration ---
 const CONFIG = {
-    cameraHeight: 12, // Higher view for open world feel
+    cameraHeight: 12, 
     cameraOffsetZ: 18,
-    moveSpeed: 10, // Slower, more walking speed
+    moveSpeed: 10, 
     turnSpeed: 5,
     runSpeedMultiplier: 1.5
 };
 
 // --- Globals ---
 let scene, renderer;
-let rendererP5; // Dedicated renderer for player 5 (diamond)
+let rendererP5; 
 let players = [];
 let cameras = [];
-let inputManager, terrainManager;
+let inputManager, terrainManager, networkManager;
 let clock;
-let playerCount = 2; // Default
+let playerCount = 1; // Default starts at 1
+let isHost = true;
+let myPlayerIndex = 0;
+let clientViewMode = true; // True = Render 3D, False = Controller Only
 
 // --- Initialization ---
-function init() {
-    // Player Selection UI Logic
-    const selBtns = document.querySelectorAll('#player-select button');
-    selBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            // update UI
-            selBtns.forEach(b => b.classList.remove('selected'));
-            e.target.classList.add('selected');
-            // update state
-            playerCount = parseInt(e.target.getAttribute('data-players'));
+async function init() {
+    networkManager = new NetworkManager();
+
+    // Check URL Params for Join
+    const urlParams = new URLSearchParams(window.location.search);
+    const joinId = urlParams.get('join');
+
+    if (joinId) {
+        // --- Client Mode ---
+        isHost = false;
+        setupClientUI();
+        try {
+            await networkManager.initClient(joinId);
+            document.getElementById('join-status').innerText = "Connected to Host!";
+        } catch (e) {
+            document.getElementById('join-status').innerText = "Connection Failed: " + e;
+        }
+    } else {
+        // --- Menu Mode ---
+        document.getElementById('main-menu').style.display = 'block';
+        document.getElementById('lobby-ui').style.display = 'none';
+        
+        document.getElementById('btn-host').addEventListener('click', async () => {
+            document.getElementById('main-menu').style.display = 'none';
+            document.getElementById('lobby-ui').style.display = 'flex';
+            
+            const id = await networkManager.initHost();
+            const joinUrl = `${window.location.origin}${window.location.pathname}?join=${id}`;
+            
+            const qrContainer = document.getElementById('qr-container');
+            QRCode.toCanvas(joinUrl, { width: 200 }, function (err, canvas) {
+                if (err) console.error(err);
+                qrContainer.appendChild(canvas);
+            });
+            
+            // Listen for joins
+            networkManager.onPlayerJoined = (index) => {
+                const list = document.getElementById('lobby-players');
+                const badge = document.createElement('div');
+                badge.className = 'player-badge';
+                // Color mapping logic later
+                badge.innerText = `P${index + 1}`;
+                list.appendChild(badge);
+                playerCount = index + 1;
+            };
         });
-    });
+    }
 
-    const startBtn = document.getElementById('start-btn');
+    const startBtn = document.getElementById('btn-start-game');
     startBtn.addEventListener('click', () => {
-        document.getElementById('start-overlay').style.display = 'none';
+        if (!isHost) return;
         
-        // Initialize Audio context
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const audioEl = new Audio('./asset_farm_music.mp3');
-        audioEl.loop = true;
-        audioEl.volume = 0.5;
-        const source = audioCtx.createMediaElementSource(audioEl);
-        source.connect(audioCtx.destination);
-        audioEl.play().catch(e => console.log("Audio play failed", e));
+        // Host starts game
+        networkManager.broadcastStart({ playerCount });
+        launchGame();
+    });
+    
+    // Client listener for start
+    if (!isHost) {
+        networkManager.onGameStart = (config) => {
+            playerCount = config.playerCount;
+            myPlayerIndex = networkManager.myPlayerIndex;
+            document.getElementById('my-player-badge').innerText = `You are P${myPlayerIndex + 1}`;
+            launchGame();
+        };
         
-        startGame();
-
-        // Start Loop
-        renderer.setAnimationLoop(animate);
+        networkManager.onPlayerJoined = (index) => {
+            // My index assigned
+             myPlayerIndex = index;
+             document.getElementById('my-player-badge').innerText = `You are P${myPlayerIndex + 1}`;
+        }
+    }
+    
+    // Mode Toggle (Client only)
+    const toggleBtn = document.getElementById('view-toggle');
+    toggleBtn.addEventListener('click', () => {
+        clientViewMode = !clientViewMode;
+        toggleBtn.innerText = clientViewMode ? "Switch to Controller Mode" : "Switch to Direct Screen";
+        if (renderer) {
+            renderer.domElement.style.display = clientViewMode ? 'block' : 'none';
+        }
     });
 }
 
-function startGame() {
+function setupClientUI() {
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('lobby-ui').style.display = 'none';
+    document.getElementById('client-wait').style.display = 'block';
+    document.getElementById('view-toggle').style.display = 'block';
+}
+
+function launchGame() {
+    document.getElementById('start-overlay').style.display = 'none';
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioEl = new Audio('./asset_farm_music.mp3');
+    audioEl.loop = true;
+    audioEl.volume = 0.5;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    // Simple play attempt
+    audioEl.play().catch(() => {}); 
+    
     setupThreeJS();
     setupInputs();
     setupWorld();
@@ -62,6 +135,9 @@ function startGame() {
     handleResize();
     
     window.addEventListener('resize', handleResize);
+    
+    // Start Loop
+    renderer.setAnimationLoop(animate);
 }
 
 function setupThreeJS() {
@@ -77,11 +153,10 @@ function setupThreeJS() {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
-    // P5 Renderer (Diamond)
-    if (playerCount === 5) {
+    // P5 Renderer (Diamond) - Only needed on Host if P5 is present
+    if (isHost && playerCount >= 5) {
         const cP5 = document.getElementById('c-p5');
         cP5.style.display = 'block';
-        // Size is controlled by CSS usually, but we need to set internal resolution
         rendererP5 = new THREE.WebGLRenderer({ canvas: cP5, antialias: true, alpha: true });
         rendererP5.shadowMap.enabled = true;
         rendererP5.outputColorSpace = THREE.SRGBColorSpace;
@@ -105,14 +180,38 @@ function setupThreeJS() {
 }
 
 function setupInputs() {
-    inputManager = new InputManager(playerCount);
+    inputManager = new InputManager(playerCount, isHost, myPlayerIndex);
     
+    // Connect network callbacks
+    if (isHost) {
+        networkManager.onInputReceived = (index, state) => {
+            inputManager.setNetworkInput(index, state);
+        };
+    }
+    
+    if (!isHost) {
+        // Client: Listen for state updates
+        networkManager.onStateReceived = (state) => {
+            // state is array of {pos, rot, animTime}
+            // Update all players in the scene
+            for (let i = 0; i < players.length; i++) {
+                if (state[i]) {
+                    // Smoothly lerp to host state
+                    // Simple snap for now to prevent drift, lerp in update loop if needed
+                    // Actually, let's just update target properties and let updatePlayer handle visuals
+                    // We'll store targetState in userData
+                    players[i].targetState = state[i]; 
+                }
+            }
+        };
+    }
+
     const zoneP1 = document.getElementById('zone-p1');
     const zoneP2 = document.getElementById('zone-p2');
     
-    // Only init touch if 2 or fewer players, or just for P1/P2 always
+    // If Client, we only use zoneP1 which maps to our index
     setTimeout(() => {
-        inputManager.initTouch(zoneP1, zoneP2);
+        inputManager.initTouch(zoneP1, isHost ? zoneP2 : null);
     }, 100);
 }
 
@@ -221,39 +320,63 @@ function setupPlayers() {
 }
 
 function updatePlayer(dt, player, input) {
-    // Movement Logic
-    const speed = CONFIG.moveSpeed * dt;
-    const isMoving = (input.y !== 0 || input.x !== 0);
-    
-    if (isMoving) {
-        // Calculate target rotation based on input
-        const targetRotation = Math.atan2(input.x, input.y);
+    // HOST Logic (Physics)
+    if (isHost) {
+        const speed = CONFIG.moveSpeed * dt;
+        const isMoving = (input.y !== 0 || input.x !== 0);
         
-        // Smooth rotation
-        let rotDiff = targetRotation - player.rotation;
-        // Normalize angle
-        while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
-        while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-        
-        player.rotation += rotDiff * CONFIG.turnSpeed * dt;
-        
-        // Move in direction of facing
-        player.pos.x += input.x * speed;
-        player.pos.z -= input.y * speed; 
-        
-        // Rotate mesh to face movement
-        player.mesh.rotation.y = Math.atan2(input.x, -input.y); 
-        
-        // Advance animation time
-        player.animTime += dt * 10;
-    } else {
-        // Reset animation to stand pose smoothly
-        // For now, just reset time
-        if (Math.sin(player.animTime) > 0.1) player.animTime += dt * 10; 
-        else player.animTime = 0;
-    }
+        if (isMoving) {
+            // Calculate target rotation based on input
+            const targetRotation = Math.atan2(input.x, input.y);
+            
+            // Smooth rotation
+            let rotDiff = targetRotation - player.rotation;
+            while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+            while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+            
+            player.rotation += rotDiff * CONFIG.turnSpeed * dt;
+            
+            // Move in direction of facing
+            player.pos.x += input.x * speed;
+            player.pos.z -= input.y * speed; 
+            
+            // Rotate mesh to face movement
+            player.mesh.rotation.y = Math.atan2(input.x, -input.y); 
+            
+            // Advance animation time
+            player.animTime += dt * 10;
+        } else {
+            if (Math.sin(player.animTime) > 0.1) player.animTime += dt * 10; 
+            else player.animTime = 0;
+        }
 
-    // --- Animation (Walk Cycle) ---
+        // Terrain Following
+        const terrainHeight = terrainManager.getHeightAt(player.pos.x, player.pos.z);
+        player.pos.y = THREE.MathUtils.lerp(player.pos.y, terrainHeight, dt * 10);
+        
+        // Apply to Mesh
+        player.mesh.position.copy(player.pos);
+    } 
+    // CLIENT Logic (Interpolation)
+    else {
+        if (player.targetState) {
+            // Lerp position
+            player.mesh.position.lerp(player.targetState.pos, dt * 10);
+            player.pos.copy(player.mesh.position);
+            
+            // Lerp rotation (Shortest path)
+            const currentQ = player.mesh.quaternion;
+            const targetQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, player.targetState.rotY, 0));
+            player.mesh.quaternion.slerp(targetQ, dt * 10);
+            
+            // Sync anim time
+            player.animTime = THREE.MathUtils.lerp(player.animTime, player.targetState.animTime, dt * 10);
+        }
+    }
+    
+    // --- Shared Animation Logic (Visuals) ---
+    // Uses player.animTime which is either calculated (Host) or synced (Client)
+    const isMoving = (player.animTime > 0.1 && Math.abs(Math.sin(player.animTime)) > 0.01); // Approx check
     const parts = player.mesh.userData;
     const legAmp = 0.6;
     const armAmp = 0.5;
@@ -277,13 +400,6 @@ function updatePlayer(dt, player, input) {
         parts.body.position.y = THREE.MathUtils.lerp(parts.body.position.y, 1.1, dt * 5);
     }
 
-    // Terrain Following
-    const terrainHeight = terrainManager.getHeightAt(player.pos.x, player.pos.z);
-    // Smooth lerp for height to prevent snapping
-    player.pos.y = THREE.MathUtils.lerp(player.pos.y, terrainHeight, dt * 10);
-
-    // Apply Position
-    player.mesh.position.copy(player.pos);
 }
 
 function updateCameras() {
@@ -300,14 +416,43 @@ function animate() {
     const dt = clock.getDelta();
     inputManager.update();
 
-    for(let i=0; i<players.length; i++) {
-        updatePlayer(dt, players[i], inputManager.state[i]);
+    if (isHost) {
+        // Process Game Logic
+        for(let i=0; i<players.length; i++) {
+            updatePlayer(dt, players[i], inputManager.state[i]);
+        }
+        
+        // Broadcast State
+        const statePacket = players.map(p => ({
+            pos: p.pos,
+            rotY: p.mesh.rotation.y,
+            animTime: p.animTime
+        }));
+        networkManager.broadcastState(statePacket);
+        
+        terrainManager.update(players.map(p => p.pos));
+    } else {
+        // Client Logic
+        // Send Input
+        const myInput = inputManager.getLocalState();
+        if (myInput) networkManager.sendInput(myInput);
+        
+        // Update Visuals (Interpolation)
+        for(let i=0; i<players.length; i++) {
+            updatePlayer(dt, players[i], null);
+        }
+        
+        // Update terrain around ME
+        if (players[myPlayerIndex]) {
+            terrainManager.update([players[myPlayerIndex].pos]);
+        }
     }
 
-    terrainManager.update(players.map(p => p.pos));
     updateCameras();
-
-    render();
+    
+    if (clientViewMode) {
+        render();
+    }
 }
 
 // --- Layout Handling ---
@@ -317,14 +462,21 @@ function handleResize() {
     
     renderer.setSize(width, height);
     
+    // Client always full screen touch zone if needed
+    if (!isHost) {
+        const zoneP1 = document.getElementById('zone-p1');
+        zoneP1.style.width = '100%'; zoneP1.style.height = '100%';
+        zoneP1.style.display = 'block';
+        return; 
+    }
+
+    // --- HOST LAYOUT LOGIC ---
     if (rendererP5) {
-        // Resize P5 canvas to be a diamond box
-        // Scaled up to 70% of min dimension (approx 1.75x larger than previous 40%)
         const size = Math.min(width, height) * 0.7;
         const cP5 = document.getElementById('c-p5');
         cP5.style.width = size + 'px';
         cP5.style.height = size + 'px';
-        rendererP5.setSize(size, size, false); // false to not resize styling
+        rendererP5.setSize(size, size, false); 
     }
 
     const divV = document.getElementById('divider-v');
@@ -332,7 +484,6 @@ function handleResize() {
     const zoneP1 = document.getElementById('zone-p1');
     const zoneP2 = document.getElementById('zone-p2');
 
-    // Default everything hidden
     divV.style.display = 'none';
     divH.style.display = 'none';
 
@@ -340,21 +491,18 @@ function handleResize() {
         zoneP1.style.width = '100%'; zoneP1.style.height = '100%';
         zoneP2.style.display = 'none';
     } else if (playerCount === 2) {
-        // Simple Split Logic
-        if (width > height) { // Landscape
+        if (width > height) { 
             divV.style.display = 'block'; divV.style.left = '50%'; divV.style.height = '100%'; divV.style.width = '2px';
             zoneP1.style.width = '50%'; zoneP1.style.height = '100%';
             zoneP2.style.width = '50%'; zoneP2.style.left = '50%';
-        } else { // Portrait
+        } else {
             divH.style.display = 'block'; divH.style.top = '50%'; divH.style.width = '100%'; divH.style.height = '2px';
             zoneP1.style.width = '100%'; zoneP1.style.height = '50%';
             zoneP2.style.width = '100%'; zoneP2.style.top = '50%';
         }
     } else {
-        // 3+ Players: Grid Layout
         divV.style.display = 'block'; divV.style.left = '50%'; divV.style.height = '100%'; divV.style.width = '2px';
         divH.style.display = 'block'; divH.style.top = '50%'; divH.style.width = '100%'; divH.style.height = '2px';
-        // Hide touch for >2 players simple
         zoneP1.style.display = 'none';
         zoneP2.style.display = 'none';
     }
@@ -364,6 +512,19 @@ function render() {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
+    // CLIENT: Simple full screen render of MY player
+    if (!isHost) {
+        renderer.setScissorTest(false);
+        renderer.setViewport(0, 0, w, h);
+        if (cameras[myPlayerIndex]) {
+            cameras[myPlayerIndex].aspect = w / h;
+            cameras[myPlayerIndex].updateProjectionMatrix();
+            renderer.render(scene, cameras[myPlayerIndex]);
+        }
+        return;
+    }
+
+    // HOST: Split Screen Logic
     renderer.setScissorTest(true);
 
     if (playerCount === 1) {
@@ -440,11 +601,7 @@ function render() {
         }
 
         // P5 Diamond (Separate Renderer)
-        if (playerCount === 5 && rendererP5 && players[4]) {
-            // rendererP5 uses its own canvas, so no scissor needed on main
-            // We just render full canvas of rendererP5
-            // But we need to make sure camera matches aspect of that square canvas
-            // The canvas is square (see handleResize)
+        if (rendererP5 && players[4]) {
             cameras[4].aspect = 1.0; 
             cameras[4].updateProjectionMatrix();
             rendererP5.render(scene, cameras[4]);
