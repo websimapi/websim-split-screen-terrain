@@ -25,6 +25,7 @@ let playerCount = 1; // Default starts at 1
 let isHost = true;
 let myPlayerIndex = 0;
 let clientViewMode = true; // True = Render 3D, False = Controller Only
+let worldSeed = Math.floor(Math.random() * 2147483647); // Default seed
 
 // --- Initialization ---
 async function init() {
@@ -80,7 +81,7 @@ async function init() {
         if (!isHost) return;
         
         // Host starts game
-        networkManager.broadcastStart({ playerCount });
+        networkManager.broadcastStart({ playerCount, seed: worldSeed });
         launchGame();
     });
     
@@ -88,6 +89,7 @@ async function init() {
     if (!isHost) {
         networkManager.onGameStart = (config) => {
             playerCount = config.playerCount;
+            worldSeed = config.seed; // Sync seed from host
             myPlayerIndex = networkManager.myPlayerIndex;
             document.getElementById('my-player-badge').innerText = `You are P${myPlayerIndex + 1}`;
             launchGame();
@@ -270,7 +272,7 @@ function setupInputs() {
 }
 
 function setupWorld() {
-    terrainManager = new TerrainManager(scene);
+    terrainManager = new TerrainManager(scene, worldSeed);
 }
 
 function createRiggedCharacter(color) {

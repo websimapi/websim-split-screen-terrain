@@ -1,10 +1,24 @@
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 
+function mulberry32(a) {
+    return function() {
+      var t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+}
+
 export class TerrainManager {
-    constructor(scene) {
+    constructor(scene, seed = 12345) {
         this.scene = scene;
-        this.noise2D = createNoise2D();
+        this.seed = seed;
+
+        // Seeded RNG for Noise
+        const rng = mulberry32(this.seed);
+        this.noise2D = createNoise2D(rng);
+
         this.chunks = new Map();
         this.chunkSize = 100;
         this.resolution = 32; // Vertices per chunk edge
@@ -122,14 +136,16 @@ export class TerrainManager {
     }
 
     populateTrees(group, cx, cz) {
-        // Simple deterministic random based on chunk coord
-        const seed = Math.abs(Math.sin(cx * 12.9898 + cz * 78.233) * 43758.5453);
-        const treeCount = Math.floor((seed - Math.floor(seed)) * 10) + 2; // 2 to 12 trees per chunk
+        // Deterministic RNG per chunk
+        const chunkSeed = (this.seed * 9301 + cx * 49297 + cz * 233280) | 0;
+        const rng = mulberry32(chunkSeed);
+
+        const treeCount = Math.floor(rng() * 10) + 2; // 2 to 12 trees per chunk
 
         for(let i=0; i<treeCount; i++) {
-            // Local position in chunk
-            const rx = (Math.random() - 0.5) * this.chunkSize * 0.8;
-            const rz = (Math.random() - 0.5) * this.chunkSize * 0.8;
+            // Local position in chunk using deterministic rng
+            const rx = (rng() - 0.5) * this.chunkSize * 0.8;
+            const rz = (rng() - 0.5) * this.chunkSize * 0.8;
             
             const worldX = rx + cx * this.chunkSize;
             const worldZ = rz + cz * this.chunkSize;
@@ -149,7 +165,7 @@ export class TerrainManager {
             trunk.add(leaves);
 
             // Randomize scale slightly for variety
-            const s = 0.8 + Math.random() * 0.5;
+            const s = 0.8 + rng() * 0.5;
             trunk.scale.set(s, s, s);
 
             group.add(trunk);
