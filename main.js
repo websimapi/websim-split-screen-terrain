@@ -360,9 +360,11 @@ function setupPlayers() {
     for (let i = 0; i < playerCount; i++) {
         const p = {
             mesh: createRiggedCharacter(colors[i % colors.length]),
-            pos: new THREE.Vector3((i - 1) * 3, 0, 0), // Simple stagger
+            pos: new THREE.Vector3((i - 1) * 3, 10, 0),
             rotation: 0,
-            animTime: 0
+            animTime: 0,
+            velY: 0,
+            isGrounded: false
         };
         scene.add(p.mesh);
         players.push(p);
@@ -377,8 +379,9 @@ function updatePlayer(dt, player, input) {
     // HOST Logic (Physics)
     if (isHost) {
         const speed = CONFIG.moveSpeed * dt;
-        const isMoving = (input.y !== 0 || input.x !== 0);
+        const isMoving = input && (input.y !== 0 || input.x !== 0);
         
+        // Horizontal Movement
         if (isMoving) {
             // Calculate target rotation based on input
             const targetRotation = Math.atan2(input.x, input.y);
@@ -391,22 +394,49 @@ function updatePlayer(dt, player, input) {
             player.rotation += rotDiff * CONFIG.turnSpeed * dt;
             
             // Move in direction of facing
+            // Input Y is forward(+1)/back(-1) from WASD, but nipple gives raw 1/-1.
+            // WASD: W(+1), S(-1). Nipple: Up(+1), Down(-1). 
+            // World: Forward is -Z. So +InputY should map to -Z movement.
             player.pos.x += input.x * speed;
             player.pos.z -= input.y * speed; 
             
-            // Rotate mesh to face movement
+            // Rotate mesh to face movement (Visuals)
             player.mesh.rotation.y = Math.atan2(input.x, -input.y); 
             
             // Advance animation time
-            player.animTime += dt * 10;
+            if (player.isGrounded) player.animTime += dt * 10;
         } else {
-            if (Math.sin(player.animTime) > 0.1) player.animTime += dt * 10; 
-            else player.animTime = 0;
+            // Return to idle stance
+            if (player.isGrounded) {
+                if (Math.sin(player.animTime) > 0.1) player.animTime += dt * 10; 
+                else player.animTime = 0;
+            }
         }
 
-        // Terrain Following
+        // Vertical Movement (Gravity & Jumping)
+        const gravity = 40;
+        const jumpForce = 15;
+        
+        player.velY -= gravity * dt;
+        player.pos.y += player.velY * dt;
+
+        // Ground Check
         const terrainHeight = terrainManager.getHeightAt(player.pos.x, player.pos.z);
-        player.pos.y = THREE.MathUtils.lerp(player.pos.y, terrainHeight, dt * 10);
+        
+        if (player.pos.y <= terrainHeight) {
+            player.pos.y = terrainHeight;
+            player.velY = 0;
+            player.isGrounded = true;
+        } else {
+            player.isGrounded = false;
+        }
+
+        // Jumping
+        if (input && input.actions && input.actions.a && player.isGrounded) {
+            player.velY = jumpForce;
+            player.isGrounded = false;
+            // Reset anim time for jump pose if we had one
+        }
         
         // Apply to Mesh
         player.mesh.position.copy(player.pos);
