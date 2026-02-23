@@ -66,12 +66,17 @@ export class TerrainManager {
         });
 
         // Remove old chunks
-        for (const [key, mesh] of this.chunks) {
+        for (const [key, chunkGroup] of this.chunks) {
             if (!activeKeys.has(key)) {
-                this.scene.remove(mesh);
-                // Dispose geometry to free memory, but we use cloned geometry so be careful.
-                // Since we modify heights, we cloned it.
-                mesh.geometry.dispose();
+                this.scene.remove(chunkGroup);
+                
+                // Cleanup memory for all meshes in the chunk group (terrain + trees)
+                chunkGroup.traverse((child) => {
+                    if (child.isMesh && child.geometry) {
+                        child.geometry.dispose();
+                    }
+                });
+                
                 this.chunks.delete(key);
             }
         }
@@ -142,6 +147,11 @@ export class TerrainManager {
             leaves.castShadow = true;
             
             trunk.add(leaves);
+
+            // Randomize scale slightly for variety
+            const s = 0.8 + Math.random() * 0.5;
+            trunk.scale.set(s, s, s);
+
             group.add(trunk);
         }
     }
