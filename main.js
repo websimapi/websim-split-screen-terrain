@@ -13,19 +13,32 @@ const CONFIG = {
 
 // --- Globals ---
 let scene, renderer;
-let camera1, camera2;
-let player1, player2;
+let rendererP5; // Dedicated renderer for player 5 (diamond)
+let players = [];
+let cameras = [];
 let inputManager, terrainManager;
 let clock;
-let engineSound;
+let playerCount = 2; // Default
 
 // --- Initialization ---
 function init() {
+    // Player Selection UI Logic
+    const selBtns = document.querySelectorAll('#player-select button');
+    selBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            // update UI
+            selBtns.forEach(b => b.classList.remove('selected'));
+            e.target.classList.add('selected');
+            // update state
+            playerCount = parseInt(e.target.getAttribute('data-players'));
+        });
+    });
+
     const startBtn = document.getElementById('start-btn');
     startBtn.addEventListener('click', () => {
         document.getElementById('start-overlay').style.display = 'none';
         
-        // Initialize Audio context on user interaction
+        // Initialize Audio context
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const audioEl = new Audio('./asset_farm_music.mp3');
         audioEl.loop = true;
@@ -44,7 +57,6 @@ function init() {
     setupPlayers();
     handleResize();
     
-    // Initial resize call
     window.addEventListener('resize', handleResize);
 }
 
@@ -53,51 +65,48 @@ function setupThreeJS() {
     scene.background = new THREE.Color(0x87CEEB); // Sky Blue
     scene.fog = new THREE.FogExp2(0x87CEEB, 0.008);
 
+    // Main Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    // Output encoding for brighter colors
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
+    // P5 Renderer (Diamond)
+    if (playerCount === 5) {
+        const cP5 = document.getElementById('c-p5');
+        cP5.style.display = 'block';
+        // Size is controlled by CSS usually, but we need to set internal resolution
+        rendererP5 = new THREE.WebGLRenderer({ canvas: cP5, antialias: true, alpha: true });
+        rendererP5.shadowMap.enabled = true;
+        rendererP5.outputColorSpace = THREE.SRGBColorSpace;
+    }
+
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Bright day ambient
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
     
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
     scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffee, 1.2); // Sun
+    const dirLight = new THREE.DirectionalLight(0xffffee, 1.2);
     dirLight.position.set(50, 100, 50);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
-    dirLight.shadow.bias = -0.0001;
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 500;
-    dirLight.shadow.camera.left = -100;
-    dirLight.shadow.camera.right = 100;
-    dirLight.shadow.camera.top = 100;
-    dirLight.shadow.camera.bottom = -100;
     scene.add(dirLight);
 
-    // Cameras
-    const aspect = (window.innerWidth / 2) / window.innerHeight;
-    camera1 = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-    camera2 = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-    
     clock = new THREE.Clock();
 }
 
 function setupInputs() {
-    inputManager = new InputManager();
+    inputManager = new InputManager(playerCount);
     
-    // Setup touch zones
     const zoneP1 = document.getElementById('zone-p1');
     const zoneP2 = document.getElementById('zone-p2');
     
-    // Wait a tick for layout
+    // Only init touch if 2 or fewer players, or just for P1/P2 always
     setTimeout(() => {
         inputManager.initTouch(zoneP1, zoneP2);
     }, 100);
@@ -189,23 +198,22 @@ function createRiggedCharacter(color) {
 }
 
 function setupPlayers() {
-    player1 = {
-        mesh: createRiggedCharacter(0xff4444), // Red Shirt
-        pos: new THREE.Vector3(-5, 0, 0),
-        vel: new THREE.Vector3(0, 0, 0),
-        rotation: 0,
-        animTime: 0
-    };
-    scene.add(player1.mesh);
+    const colors = [0xff4444, 0x4444ff, 0x44ff44, 0xffff44, 0xff44ff]; // Red, Blue, Green, Yellow, Magenta
+    
+    for (let i = 0; i < playerCount; i++) {
+        const p = {
+            mesh: createRiggedCharacter(colors[i % colors.length]),
+            pos: new THREE.Vector3((i - 1) * 3, 0, 0), // Simple stagger
+            rotation: 0,
+            animTime: 0
+        };
+        scene.add(p.mesh);
+        players.push(p);
 
-    player2 = {
-        mesh: createRiggedCharacter(0x4444ff), // Blue Shirt
-        pos: new THREE.Vector3(5, 0, 0),
-        vel: new THREE.Vector3(0, 0, 0),
-        rotation: 0,
-        animTime: 0
-    };
-    scene.add(player2.mesh);
+        // Camera for this player
+        const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+        cameras.push(cam);
+    }
 }
 
 function updatePlayer(dt, player, input) {
@@ -275,136 +283,170 @@ function updatePlayer(dt, player, input) {
 }
 
 function updateCameras() {
-    // Camera 1 Follow
-    const offset1 = new THREE.Vector3(0, CONFIG.cameraHeight, CONFIG.cameraOffsetZ);
-    // Rotate offset by player rotation if we want third person lock, 
-    // but fixed angle is often better for simple arcade games.
-    // Let's do simple follow with fixed offset
-    camera1.position.copy(player1.pos).add(offset1);
-    camera1.lookAt(player1.pos.clone().add(new THREE.Vector3(0, 2, -5)));
+    const offset = new THREE.Vector3(0, CONFIG.cameraHeight, CONFIG.cameraOffsetZ);
+    const lookOffset = new THREE.Vector3(0, 2, -5);
 
-    // Camera 2 Follow
-    const offset2 = new THREE.Vector3(0, CONFIG.cameraHeight, CONFIG.cameraOffsetZ);
-    camera2.position.copy(player2.pos).add(offset2);
-    camera2.lookAt(player2.pos.clone().add(new THREE.Vector3(0, 2, -5)));
+    for(let i=0; i<players.length; i++) {
+        cameras[i].position.copy(players[i].pos).add(offset);
+        cameras[i].lookAt(players[i].pos.clone().add(lookOffset));
+    }
 }
 
 function animate() {
     const dt = clock.getDelta();
     inputManager.update();
 
-    updatePlayer(dt, player1, inputManager.state.p1);
-    updatePlayer(dt, player2, inputManager.state.p2);
+    for(let i=0; i<players.length; i++) {
+        updatePlayer(dt, players[i], inputManager.state[i]);
+    }
 
-    terrainManager.update([player1.pos, player2.pos]);
+    terrainManager.update(players.map(p => p.pos));
     updateCameras();
 
     render();
 }
 
 // --- Layout Handling ---
-let splitType = 'vertical'; // vertical line splitting left/right
-
 function handleResize() {
     const width = window.innerWidth;
     const height = window.innerHeight;
     
     renderer.setSize(width, height);
-
-    // Determine split based on aspect ratio
-    // If width > height (Landscape), split Left/Right
-    // If height > width (Portrait), split Top/Bottom
     
-    const divider = document.getElementById('divider');
+    if (rendererP5) {
+        // Resize P5 canvas to be a diamond box
+        // We want it to be ~30% of screen min dimension
+        const size = Math.min(width, height) * 0.4;
+        const cP5 = document.getElementById('c-p5');
+        cP5.style.width = size + 'px';
+        cP5.style.height = size + 'px';
+        rendererP5.setSize(size, size, false); // false to not resize styling
+    }
+
+    const divV = document.getElementById('divider-v');
+    const divH = document.getElementById('divider-h');
     const zoneP1 = document.getElementById('zone-p1');
     const zoneP2 = document.getElementById('zone-p2');
 
-    if (width > height) {
-        // Landscape -> Side by Side
-        splitType = 'vertical';
-        divider.style.width = '2px';
-        divider.style.height = '100%';
-        divider.style.top = '0';
-        divider.style.left = '50%';
-        divider.style.transform = 'translateX(-50%)';
+    // Default everything hidden
+    divV.style.display = 'none';
+    divH.style.display = 'none';
 
-        zoneP1.style.width = '50%';
-        zoneP1.style.height = '100%';
-        zoneP1.style.left = '0';
-        zoneP1.style.top = '0';
-
-        zoneP2.style.width = '50%';
-        zoneP2.style.height = '100%';
-        zoneP2.style.left = '50%';
-        zoneP2.style.top = '0';
-
+    if (playerCount === 1) {
+        zoneP1.style.width = '100%'; zoneP1.style.height = '100%';
+        zoneP2.style.display = 'none';
+    } else if (playerCount === 2) {
+        // Simple Split Logic
+        if (width > height) { // Landscape
+            divV.style.display = 'block'; divV.style.left = '50%'; divV.style.height = '100%'; divV.style.width = '2px';
+            zoneP1.style.width = '50%'; zoneP1.style.height = '100%';
+            zoneP2.style.width = '50%'; zoneP2.style.left = '50%';
+        } else { // Portrait
+            divH.style.display = 'block'; divH.style.top = '50%'; divH.style.width = '100%'; divH.style.height = '2px';
+            zoneP1.style.width = '100%'; zoneP1.style.height = '50%';
+            zoneP2.style.width = '100%'; zoneP2.style.top = '50%';
+        }
     } else {
-        // Portrait -> Top and Bottom
-        splitType = 'horizontal';
-        divider.style.width = '100%';
-        divider.style.height = '2px';
-        divider.style.top = '50%';
-        divider.style.left = '0';
-        divider.style.transform = 'translateY(-50%)';
-
-        zoneP1.style.width = '100%';
-        zoneP1.style.height = '50%';
-        zoneP1.style.left = '0';
-        zoneP1.style.top = '0'; // Top half
-
-        zoneP2.style.width = '100%';
-        zoneP2.style.height = '50%';
-        zoneP2.style.left = '0';
-        zoneP2.style.top = '50%'; // Bottom half
+        // 3+ Players: Grid Layout
+        divV.style.display = 'block'; divV.style.left = '50%'; divV.style.height = '100%'; divV.style.width = '2px';
+        divH.style.display = 'block'; divH.style.top = '50%'; divH.style.width = '100%'; divH.style.height = '2px';
+        // Hide touch for >2 players simple
+        zoneP1.style.display = 'none';
+        zoneP2.style.display = 'none';
     }
-    
-    // Re-init nipplejs if needed or just let CSS handle zones? 
-    // NippleJS binds to the element dimensions, so it might handle resize automatically if container resizes.
-    // Ideally we re-run initTouch but nipplejs instances are static. 
-    // For this simple demo, we assume CSS handles the zone size and nipple renders relative to it.
 }
 
 function render() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
 
     renderer.setScissorTest(true);
 
-    if (splitType === 'vertical') {
-        // Player 1 (Left)
-        const halfWidth = width / 2;
-        renderer.setScissor(0, 0, halfWidth, height);
-        renderer.setViewport(0, 0, halfWidth, height);
-        camera1.aspect = halfWidth / height;
-        camera1.updateProjectionMatrix();
-        renderer.render(scene, camera1);
+    if (playerCount === 1) {
+        renderer.setScissor(0, 0, w, h);
+        renderer.setViewport(0, 0, w, h);
+        cameras[0].aspect = w / h;
+        cameras[0].updateProjectionMatrix();
+        renderer.render(scene, cameras[0]);
+    } else if (playerCount === 2) {
+        if (w > h) {
+            // Split Vertically (Side by Side)
+            const hw = w / 2;
+            renderer.setScissor(0, 0, hw, h);
+            renderer.setViewport(0, 0, hw, h);
+            cameras[0].aspect = hw / h;
+            cameras[0].updateProjectionMatrix();
+            renderer.render(scene, cameras[0]);
 
-        // Player 2 (Right)
-        renderer.setScissor(halfWidth, 0, halfWidth, height);
-        renderer.setViewport(halfWidth, 0, halfWidth, height);
-        camera2.aspect = halfWidth / height;
-        camera2.updateProjectionMatrix();
-        renderer.render(scene, camera2);
+            renderer.setScissor(hw, 0, hw, h);
+            renderer.setViewport(hw, 0, hw, h);
+            cameras[1].aspect = hw / h;
+            cameras[1].updateProjectionMatrix();
+            renderer.render(scene, cameras[1]);
+        } else {
+            // Split Horizontally (Top/Bottom)
+            const hh = h / 2;
+            renderer.setScissor(0, hh, w, hh);
+            renderer.setViewport(0, hh, w, hh);
+            cameras[0].aspect = w / hh;
+            cameras[0].updateProjectionMatrix();
+            renderer.render(scene, cameras[0]);
+
+            renderer.setScissor(0, 0, w, hh);
+            renderer.setViewport(0, 0, w, hh);
+            cameras[1].aspect = w / hh;
+            cameras[1].updateProjectionMatrix();
+            renderer.render(scene, cameras[1]);
+        }
     } else {
-        // Player 1 (Top) - Wait, standard coordinate system: 0,0 is bottom left.
-        // So Top is y = height/2 to height
-        const halfHeight = height / 2;
-        
-        // P1 Top View
-        renderer.setScissor(0, halfHeight, width, halfHeight);
-        renderer.setViewport(0, halfHeight, width, halfHeight);
-        camera1.aspect = width / halfHeight;
-        camera1.updateProjectionMatrix();
-        renderer.render(scene, camera1);
+        // 3, 4, or 5 Players (Grid Layout)
+        const hw = w / 2;
+        const hh = h / 2;
 
-        // P2 Bottom View
-        renderer.setScissor(0, 0, width, halfHeight);
-        renderer.setViewport(0, 0, width, halfHeight);
-        camera2.aspect = width / halfHeight;
-        camera2.updateProjectionMatrix();
-        renderer.render(scene, camera2);
+        // P1 Top Left
+        renderer.setScissor(0, hh, hw, hh);
+        renderer.setViewport(0, hh, hw, hh);
+        cameras[0].aspect = hw / hh;
+        cameras[0].updateProjectionMatrix();
+        renderer.render(scene, cameras[0]);
+
+        // P2 Top Right
+        renderer.setScissor(hw, hh, hw, hh);
+        renderer.setViewport(hw, hh, hw, hh);
+        cameras[1].aspect = hw / hh;
+        cameras[1].updateProjectionMatrix();
+        renderer.render(scene, cameras[1]);
+
+        // P3 Bottom Left
+        if (players[2]) {
+            renderer.setScissor(0, 0, hw, hh);
+            renderer.setViewport(0, 0, hw, hh);
+            cameras[2].aspect = hw / hh;
+            cameras[2].updateProjectionMatrix();
+            renderer.render(scene, cameras[2]);
+        }
+
+        // P4 Bottom Right
+        if (players[3]) {
+            renderer.setScissor(hw, 0, hw, hh);
+            renderer.setViewport(hw, 0, hw, hh);
+            cameras[3].aspect = hw / hh;
+            cameras[3].updateProjectionMatrix();
+            renderer.render(scene, cameras[3]);
+        }
+
+        // P5 Diamond (Separate Renderer)
+        if (playerCount === 5 && rendererP5 && players[4]) {
+            // rendererP5 uses its own canvas, so no scissor needed on main
+            // We just render full canvas of rendererP5
+            // But we need to make sure camera matches aspect of that square canvas
+            // The canvas is square (see handleResize)
+            cameras[4].aspect = 1.0; 
+            cameras[4].updateProjectionMatrix();
+            rendererP5.render(scene, cameras[4]);
+        }
     }
-
+    
     renderer.setScissorTest(false);
 }
 
