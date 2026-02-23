@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 
+// Simple seeded RNG (Mulberry32)
 function mulberry32(a) {
     return function() {
       var t = a += 0x6D2B79F5;
@@ -11,14 +12,11 @@ function mulberry32(a) {
 }
 
 export class TerrainManager {
-    constructor(scene, seed = 12345) {
+    constructor(scene, seed) {
         this.scene = scene;
-        this.seed = seed;
-
-        // Seeded RNG for Noise
-        const rng = mulberry32(this.seed);
-        this.noise2D = createNoise2D(rng);
-
+        this.seed = seed || 12345;
+        this.rng = mulberry32(this.seed);
+        this.noise2D = createNoise2D(this.rng);
         this.chunks = new Map();
         this.chunkSize = 100;
         this.resolution = 32; // Vertices per chunk edge
@@ -136,16 +134,18 @@ export class TerrainManager {
     }
 
     populateTrees(group, cx, cz) {
-        // Deterministic RNG per chunk
-        const chunkSeed = (this.seed * 9301 + cx * 49297 + cz * 233280) | 0;
-        const rng = mulberry32(chunkSeed);
+        // Chunk-specific seeded RNG for deterministic placement
+        // Create a unique seed for this chunk based on world seed and coords
+        // We use a simple integer hash logic
+        const chunkSeed = (this.seed + cx * 5915587277 + cz * 1500450271) | 0;
+        const chunkRng = mulberry32(chunkSeed);
 
-        const treeCount = Math.floor(rng() * 10) + 2; // 2 to 12 trees per chunk
+        const treeCount = Math.floor(chunkRng() * 10) + 2; 
 
         for(let i=0; i<treeCount; i++) {
-            // Local position in chunk using deterministic rng
-            const rx = (rng() - 0.5) * this.chunkSize * 0.8;
-            const rz = (rng() - 0.5) * this.chunkSize * 0.8;
+            // Local position in chunk using deterministic RNG
+            const rx = (chunkRng() - 0.5) * this.chunkSize * 0.8;
+            const rz = (chunkRng() - 0.5) * this.chunkSize * 0.8;
             
             const worldX = rx + cx * this.chunkSize;
             const worldZ = rz + cz * this.chunkSize;
@@ -164,8 +164,8 @@ export class TerrainManager {
             
             trunk.add(leaves);
 
-            // Randomize scale slightly for variety
-            const s = 0.8 + rng() * 0.5;
+            // Randomize scale slightly for variety (deterministically)
+            const s = 0.8 + chunkRng() * 0.5;
             trunk.scale.set(s, s, s);
 
             group.add(trunk);

@@ -25,7 +25,7 @@ let playerCount = 1; // Default starts at 1
 let isHost = true;
 let myPlayerIndex = 0;
 let clientViewMode = true; // True = Render 3D, False = Controller Only
-let worldSeed = Math.floor(Math.random() * 2147483647); // Default seed
+let worldSeed = Math.floor(Math.random() * 2147483647);
 
 // --- Initialization ---
 async function init() {
@@ -89,7 +89,7 @@ async function init() {
     if (!isHost) {
         networkManager.onGameStart = (config) => {
             playerCount = config.playerCount;
-            worldSeed = config.seed; // Sync seed from host
+            if (config.seed !== undefined) worldSeed = config.seed;
             myPlayerIndex = networkManager.myPlayerIndex;
             document.getElementById('my-player-badge').innerText = `You are P${myPlayerIndex + 1}`;
             launchGame();
