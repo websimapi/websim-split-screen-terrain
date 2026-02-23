@@ -4,10 +4,11 @@ import { TerrainManager } from './terrain.js';
 
 // --- Configuration ---
 const CONFIG = {
-    cameraHeight: 8,
-    cameraOffsetZ: 12,
-    moveSpeed: 20,
-    turnSpeed: 3
+    cameraHeight: 12, // Higher view for open world feel
+    cameraOffsetZ: 18,
+    moveSpeed: 10, // Slower, more walking speed
+    turnSpeed: 5,
+    runSpeedMultiplier: 1.5
 };
 
 // --- Globals ---
@@ -26,8 +27,9 @@ function init() {
         
         // Initialize Audio context on user interaction
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const audioEl = new Audio('./engine_hum.mp3');
+        const audioEl = new Audio('./asset_farm_music.mp3');
         audioEl.loop = true;
+        audioEl.volume = 0.5;
         const source = audioCtx.createMediaElementSource(audioEl);
         source.connect(audioCtx.destination);
         audioEl.play().catch(e => console.log("Audio play failed", e));
@@ -48,24 +50,30 @@ function init() {
 
 function setupThreeJS() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050510);
-    scene.fog = new THREE.FogExp2(0x050510, 0.02);
+    scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+    scene.fog = new THREE.FogExp2(0x87CEEB, 0.008);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Output encoding for brighter colors
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0x404040, 2); // Soft white light
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Bright day ambient
     scene.add(ambientLight);
+    
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+    scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    const dirLight = new THREE.DirectionalLight(0xffffee, 1.2); // Sun
     dirLight.position.set(50, 100, 50);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.bias = -0.0001;
     dirLight.shadow.camera.near = 0.5;
     dirLight.shadow.camera.far = 500;
     dirLight.shadow.camera.left = -100;
@@ -99,61 +107,103 @@ function setupWorld() {
     terrainManager = new TerrainManager(scene);
 }
 
-function createPlayerMesh(color, texturePath) {
+function createRiggedCharacter(color) {
     const group = new THREE.Group();
+    
+    // Materials
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xffccaa, roughness: 0.5 });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.8 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x334455, roughness: 0.9 });
+    
+    const faceTexture = new THREE.TextureLoader().load('./asset_farmer_face.png');
+    
+    // --- Rig Hierarchy ---
+    // Root -> Hip/Body
+    // Body -> Head
+    // Body -> ArmL, ArmR
+    // Body -> LegL, LegR
+    
+    // Body Center (Pivot is approx center of torso)
+    const bodyGeo = new THREE.BoxGeometry(0.6, 0.7, 0.4);
+    const body = new THREE.Mesh(bodyGeo, shirtMat);
+    body.position.y = 1.1; // Float above ground so legs touch 0
+    body.castShadow = true;
+    group.add(body);
+    
+    // Head
+    const headGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    // Multi-material for face? Or just simple cube with texture on front
+    const faceMat = new THREE.MeshStandardMaterial({ map: faceTexture, transparent: true, color: 0xffccaa });
+    const headMaterials = [
+        skinMat, // right
+        skinMat, // left
+        skinMat, // top
+        skinMat, // bottom
+        faceMat, // front
+        skinMat  // back
+    ];
+    
+    const head = new THREE.Mesh(headGeo, headMaterials);
+    head.position.y = 0.6; 
+    head.castShadow = true;
+    body.add(head); 
 
-    // Body
-    const geometry = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
-    const texture = new THREE.TextureLoader().load(texturePath);
-    const material = new THREE.MeshStandardMaterial({ 
-        map: texture,
-        color: color,
-        roughness: 0.2,
-        metalness: 0.8,
-        emissive: color,
-        emissiveIntensity: 0.5
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.y = 1; // Center of capsule is 0, so lift it up half height + radius approx
-    mesh.castShadow = true;
+    // Hat (Straw hat)
+    const hatGeo = new THREE.ConeGeometry(0.6, 0.3, 32);
+    const hatMat = new THREE.MeshStandardMaterial({ color: 0xeebb55 });
+    const hat = new THREE.Mesh(hatGeo, hatMat);
+    hat.position.y = 0.35;
+    head.add(hat);
     
-    // Glow ring
-    const ringGeo = new THREE.TorusGeometry(0.8, 0.05, 8, 32);
-    const ringMat = new THREE.MeshBasicMaterial({ color: color });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.2;
+    // Arms (Pivot at shoulder top)
+    const armGeo = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+    armGeo.translate(0, -0.25, 0); // Shift pivot to top
     
-    group.add(mesh);
-    group.add(ring);
+    const armL = new THREE.Mesh(armGeo, shirtMat);
+    armL.position.set(-0.4, 0.3, 0);
+    armL.castShadow = true;
+    body.add(armL);
     
-    // Add a spot light for the ray-traced feel
-    const spotLight = new THREE.SpotLight(color, 20);
-    spotLight.position.set(0, 5, 0);
-    spotLight.target = mesh;
-    spotLight.angle = 0.5;
-    spotLight.penumbra = 0.5;
-    spotLight.distance = 20;
-    spotLight.castShadow = true;
-    group.add(spotLight);
-
+    const armR = new THREE.Mesh(armGeo, shirtMat);
+    armR.position.set(0.4, 0.3, 0);
+    armR.castShadow = true;
+    body.add(armR);
+    
+    // Legs (Pivot at hip top)
+    const legGeo = new THREE.BoxGeometry(0.22, 0.7, 0.22);
+    legGeo.translate(0, -0.35, 0); // Shift pivot to top
+    
+    const legL = new THREE.Mesh(legGeo, pantsMat);
+    legL.position.set(-0.15, -0.35, 0);
+    legL.castShadow = true;
+    body.add(legL);
+    
+    const legR = new THREE.Mesh(legGeo, pantsMat);
+    legR.position.set(0.15, -0.35, 0);
+    legR.castShadow = true;
+    body.add(legR);
+    
+    // Return parts for animation
+    group.userData = { body, head, armL, armR, legL, legR };
     return group;
 }
 
 function setupPlayers() {
     player1 = {
-        mesh: createPlayerMesh(0xff0000, './player_1.png'),
+        mesh: createRiggedCharacter(0xff4444), // Red Shirt
         pos: new THREE.Vector3(-5, 0, 0),
         vel: new THREE.Vector3(0, 0, 0),
-        rotation: 0
+        rotation: 0,
+        animTime: 0
     };
     scene.add(player1.mesh);
 
     player2 = {
-        mesh: createPlayerMesh(0x0000ff, './player_2.png'),
+        mesh: createRiggedCharacter(0x4444ff), // Blue Shirt
         pos: new THREE.Vector3(5, 0, 0),
         vel: new THREE.Vector3(0, 0, 0),
-        rotation: 0
+        rotation: 0,
+        animTime: 0
     };
     scene.add(player2.mesh);
 }
@@ -161,8 +211,9 @@ function setupPlayers() {
 function updatePlayer(dt, player, input) {
     // Movement Logic
     const speed = CONFIG.moveSpeed * dt;
+    const isMoving = (input.y !== 0 || input.x !== 0);
     
-    if (input.y !== 0 || input.x !== 0) {
+    if (isMoving) {
         // Calculate target rotation based on input
         const targetRotation = Math.atan2(input.x, input.y);
         
@@ -175,13 +226,43 @@ function updatePlayer(dt, player, input) {
         player.rotation += rotDiff * CONFIG.turnSpeed * dt;
         
         // Move in direction of facing
-        // Actually, let's move in direction of input relative to camera?
-        // For simplicity: simple absolute direction movement
         player.pos.x += input.x * speed;
-        player.pos.z -= input.y * speed; // -y is forward in 3D usually (negative Z)
+        player.pos.z -= input.y * speed; 
         
         // Rotate mesh to face movement
-        player.mesh.rotation.y = Math.atan2(input.x, -input.y); // face direction
+        player.mesh.rotation.y = Math.atan2(input.x, -input.y); 
+        
+        // Advance animation time
+        player.animTime += dt * 10;
+    } else {
+        // Reset animation to stand pose smoothly
+        // For now, just reset time
+        if (Math.sin(player.animTime) > 0.1) player.animTime += dt * 10; 
+        else player.animTime = 0;
+    }
+
+    // --- Animation (Walk Cycle) ---
+    const parts = player.mesh.userData;
+    const legAmp = 0.6;
+    const armAmp = 0.5;
+    
+    if (isMoving) {
+        // Simple sin wave walk cycle
+        parts.legL.rotation.x = Math.sin(player.animTime) * legAmp;
+        parts.legR.rotation.x = Math.sin(player.animTime + Math.PI) * legAmp;
+        
+        parts.armL.rotation.x = Math.sin(player.animTime + Math.PI) * armAmp;
+        parts.armR.rotation.x = Math.sin(player.animTime) * armAmp;
+        
+        // Bobbing body
+        parts.body.position.y = 1.1 + Math.abs(Math.sin(player.animTime * 2)) * 0.05;
+    } else {
+        // Idle breathing
+        parts.legL.rotation.x = THREE.MathUtils.lerp(parts.legL.rotation.x, 0, dt * 5);
+        parts.legR.rotation.x = THREE.MathUtils.lerp(parts.legR.rotation.x, 0, dt * 5);
+        parts.armL.rotation.x = THREE.MathUtils.lerp(parts.armL.rotation.x, 0, dt * 5);
+        parts.armR.rotation.x = THREE.MathUtils.lerp(parts.armR.rotation.x, 0, dt * 5);
+        parts.body.position.y = THREE.MathUtils.lerp(parts.body.position.y, 1.1, dt * 5);
     }
 
     // Terrain Following

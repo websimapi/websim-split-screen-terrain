@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Split Screen Terrain</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; touch-action: none; }
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; touch-action: none; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         canvas { display: block; }
         #ui-layer {
             position: absolute;
@@ -45,31 +45,47 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.8);
-            color: #fff;
+            background: linear-gradient(to bottom, #87CEEB, #e0f7fa);
+            color: #4a4a4a;
             display: flex;
             justify-content: center;
             align-items: center;
             flex-direction: column;
-            font-family: monospace;
+            font-family: 'Verdana', sans-serif;
             z-index: 20;
             pointer-events: auto;
             text-align: center;
         }
-        h1 { margin: 0 0 20px 0; text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 10px #0ff; }
+        h1 { 
+            margin: 0 0 20px 0; 
+            letter-spacing: 2px; 
+            color: #2e7d32;
+            text-shadow: 1px 1px 0px #fff;
+            font-size: 3rem;
+        }
         .controls-info { display: flex; gap: 40px; margin-bottom: 30px; }
-        .p-card { border: 1px solid #333; padding: 20px; border-radius: 8px; background: #111; }
-        .key { display: inline-block; padding: 4px 8px; border: 1px solid #666; border-radius: 4px; color: #aaa; margin: 2px; }
+        .p-card { 
+            border: 4px solid #fff; 
+            padding: 20px; 
+            border-radius: 15px; 
+            background: rgba(255,255,255,0.8);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .key { display: inline-block; padding: 4px 8px; border: 1px solid #666; border-radius: 4px; color: #555; margin: 2px; background: #fff; }
         button {
             padding: 15px 40px;
-            background: #0ff;
-            border: none;
-            font-size: 1.2rem;
+            background: #ffa000;
+            color: white;
+            border: 4px solid #fff;
+            border-radius: 30px;
+            font-size: 1.5rem;
             font-weight: bold;
             cursor: pointer;
             text-transform: uppercase;
-            box-shadow: 0 0 20px #0ff;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
         }
+        button:active { transform: scale(0.95); }
     </style>
     <script type="importmap">
     {
@@ -84,20 +100,20 @@
 </head>
 <body>
     <div id="start-overlay">
-        <h1>Neon Raycers</h1>
+        <h1>Farm Friends</h1>
         <div class="controls-info">
-            <div class="p-card" style="border-color: #ff4444;">
-                <h3 style="color: #ff4444;">Player 1</h3>
+            <div class="p-card" style="border-bottom: 5px solid #ff7777;">
+                <h3 style="color: #d32f2f;">Farmer Red</h3>
                 <div>WASD</div>
                 <div>Left Stick</div>
             </div>
-            <div class="p-card" style="border-color: #4444ff;">
-                <h3 style="color: #4444ff;">Player 2</h3>
+            <div class="p-card" style="border-bottom: 5px solid #7777ff;">
+                <h3 style="color: #1976d2;">Farmer Blue</h3>
                 <div>YGHJ</div>
                 <div>Right Stick</div>
             </div>
         </div>
-        <button id="start-btn">Initialize System</button>
+        <button id="start-btn">Start Farming</button>
     </div>
 
     <div id="ui-layer">
