@@ -47,10 +47,14 @@ function init() {
         source.connect(audioCtx.destination);
         audioEl.play().catch(e => console.log("Audio play failed", e));
         
+        startGame();
+
         // Start Loop
         renderer.setAnimationLoop(animate);
     });
+}
 
+function startGame() {
     setupThreeJS();
     setupInputs();
     setupWorld();
