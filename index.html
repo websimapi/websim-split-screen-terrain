@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Split Screen Terrain</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; touch-action: none; }
+        canvas { display: block; }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+        }
+        .split-divider {
+            position: absolute;
+            background: #fff;
+            opacity: 0.2;
+            pointer-events: none;
+        }
+        /* Touch controls container */
+        #touch-controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .zone {
+            position: absolute;
+            pointer-events: auto;
+            /* Debug helper: background: rgba(255,0,0,0.1); */
+        }
+        /* Initial overlay */
+        #start-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            font-family: monospace;
+            z-index: 20;
+            pointer-events: auto;
+            text-align: center;
+        }
+        h1 { margin: 0 0 20px 0; text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 10px #0ff; }
+        .controls-info { display: flex; gap: 40px; margin-bottom: 30px; }
+        .p-card { border: 1px solid #333; padding: 20px; border-radius: 8px; background: #111; }
+        .key { display: inline-block; padding: 4px 8px; border: 1px solid #666; border-radius: 4px; color: #aaa; margin: 2px; }
+        button {
+            padding: 15px 40px;
+            background: #0ff;
+            border: none;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 0 20px #0ff;
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://esm.sh/three@0.160.0",
+            "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/",
+            "nipplejs": "https://esm.sh/nipplejs@0.10.1",
+            "simplex-noise": "https://esm.sh/simplex-noise@4.0.1"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="start-overlay">
+        <h1>Neon Raycers</h1>
+        <div class="controls-info">
+            <div class="p-card" style="border-color: #ff4444;">
+                <h3 style="color: #ff4444;">Player 1</h3>
+                <div>WASD</div>
+                <div>Left Stick</div>
+            </div>
+            <div class="p-card" style="border-color: #4444ff;">
+                <h3 style="color: #4444ff;">Player 2</h3>
+                <div>YGHJ</div>
+                <div>Right Stick</div>
+            </div>
+        </div>
+        <button id="start-btn">Initialize System</button>
+    </div>
+
+    <div id="ui-layer">
+        <div id="divider" class="split-divider"></div>
+    </div>
+    <div id="touch-controls">
+        <div id="zone-p1" class="zone"></div>
+        <div id="zone-p2" class="zone"></div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
