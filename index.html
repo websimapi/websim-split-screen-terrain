@@ -159,6 +159,31 @@
         button:hover { background: #ffb300; }
         button:active { transform: scale(0.95); }
         button.selected { background: #e65100; border-color: #ffe0b2; }
+
+        #qr-scanner-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #scanner-container {
+            background: white; padding: 20px; border-radius: 10px;
+            width: 90%; max-width: 400px;
+            display: flex; flex-direction: column; gap: 10px; text-align: center;
+        }
+        #reader { width: 100%; min-height: 250px; background: #000; }
+        
+        .icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+        .icon-btn img {
+            width: 32px; height: 32px;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+        }
     </style>
     <script type="importmap">
     {
@@ -168,7 +193,8 @@
             "nipplejs": "https://esm.sh/nipplejs@0.10.1",
             "simplex-noise": "https://esm.sh/simplex-noise@4.0.1",
             "peerjs": "https://esm.sh/peerjs@1.5.2",
-            "qrcode": "https://esm.sh/qrcode@1.5.3"
+            "qrcode": "https://esm.sh/qrcode@1.5.3",
+            "html5-qrcode": "https://esm.sh/html5-qrcode@2.3.8"
         }
     }
     </script>
@@ -183,7 +209,12 @@
             <br><br>
             <p>-- OR --</p>
             <br>
-            <div id="join-status">Scan Host QR Code to Join</div>
+            <button id="btn-scan" class="icon-btn">
+                <img src="./asset_icon_camera.png" alt="Camera">
+                Scan to Join
+            </button>
+            <br>
+            <div id="join-status"></div>
         </div>
 
         <!-- Host Lobby -->
@@ -207,6 +238,15 @@
     </div>
 
     <button id="view-toggle" class="mode-toggle">Switch to Controller Mode</button>
+
+    <!-- QR Scanner Overlay -->
+    <div id="qr-scanner-overlay">
+        <div id="scanner-container">
+            <h3>Scan Host QR</h3>
+            <div id="reader"></div>
+            <button id="btn-close-scanner" style="background:#ff4444;">Cancel</button>
+        </div>
+    </div>
 
     <!-- Main canvas for P1-P4 -->
     <!-- Created by ThreeJS logic usually, but we want strict control if we have 2 canvases -->

@@ -3,6 +3,7 @@ import { InputManager } from './input.js';
 import { TerrainManager } from './terrain.js';
 import { NetworkManager } from './network.js';
 import QRCode from 'qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 
 // --- Configuration ---
 const CONFIG = {
@@ -108,6 +109,59 @@ async function init() {
             renderer.domElement.style.display = clientViewMode ? 'block' : 'none';
         }
     });
+
+    // QR Scanning
+    const scanBtn = document.getElementById('btn-scan');
+    const closeScanBtn = document.getElementById('btn-close-scanner');
+    let qrScanner = null;
+
+    if (scanBtn) {
+        scanBtn.addEventListener('click', () => {
+            document.getElementById('qr-scanner-overlay').style.display = 'flex';
+            
+            // Start Scanner
+            qrScanner = new Html5Qrcode("reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+            
+            qrScanner.start({ facingMode: "environment" }, config, (decodedText) => {
+                // Success
+                console.log("Scanned:", decodedText);
+                stopScanner();
+                
+                // Determine if it's a URL or ID
+                if (decodedText.includes(window.location.origin)) {
+                    window.location.href = decodedText;
+                } else if (decodedText.startsWith('http')) {
+                    window.location.href = decodedText; // External URL?
+                } else {
+                    // Assume it's just the ID
+                    const newUrl = new URL(window.location.href);
+                    newUrl.searchParams.set('join', decodedText);
+                    window.location.href = newUrl.toString();
+                }
+            }, 
+            (err) => { /* ignore per-frame errors */ })
+            .catch(err => {
+                console.error(err);
+                alert("Could not access camera. Please ensure permissions are granted.");
+                stopScanner();
+            });
+        });
+    }
+
+    if (closeScanBtn) {
+        closeScanBtn.addEventListener('click', stopScanner);
+    }
+
+    function stopScanner() {
+        document.getElementById('qr-scanner-overlay').style.display = 'none';
+        if (qrScanner) {
+            qrScanner.stop().then(() => {
+                qrScanner.clear();
+                qrScanner = null;
+            }).catch(console.error);
+        }
+    }
 }
 
 function setupClientUI() {
