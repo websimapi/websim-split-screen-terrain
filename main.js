@@ -319,8 +319,8 @@ function handleResize() {
     
     if (rendererP5) {
         // Resize P5 canvas to be a diamond box
-        // We want it to be ~30% of screen min dimension
-        const size = Math.min(width, height) * 0.4;
+        // Scaled up to 70% of min dimension (approx 1.75x larger than previous 40%)
+        const size = Math.min(width, height) * 0.7;
         const cP5 = document.getElementById('c-p5');
         cP5.style.width = size + 'px';
         cP5.style.height = size + 'px';
