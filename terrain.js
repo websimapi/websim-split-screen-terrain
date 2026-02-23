@@ -305,6 +305,7 @@ export class TerrainManager {
     
     // Sync active items from Host
     syncItems(itemsData) {
+        if (!itemsData) return;
         // Naive sync: remove all, re-add all (optimize later)
         // Or diff. For now, since items are few, we can diff by ID.
         

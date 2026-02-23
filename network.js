@@ -19,6 +19,11 @@ export class NetworkManager {
         this.isHost = true;
         this.peer = new Peer(); // Auto-gen ID
         
+        // Handle Host Unload to clean up peers?
+        window.addEventListener('beforeunload', () => {
+            this.broadcastQuit();
+        });
+
         return new Promise((resolve) => {
             this.peer.on('open', (id) => {
                 console.log('Host ID:', id);
@@ -66,6 +71,9 @@ export class NetworkManager {
             
             // Tell client who they are
             conn.send({ type: 'WELCOME', index: newIndex });
+            
+            // Notify listener (Host logic) so it can send lobby info
+            if (this.onPlayerJoined) this.onPlayerJoined(newIndex, null, conn);
         });
 
         conn.on('data', (data) => {
@@ -74,8 +82,9 @@ export class NetworkManager {
                 // Update connection info
                 const c = this.connections.find(c => c.index === newIndex);
                 if (c) c.uuid = playerUUID;
-                
-                if (this.onPlayerJoined) this.onPlayerJoined(newIndex, playerUUID);
+            }
+            if (data.type === 'PLAYER_READY') {
+                if (this.onPlayerReady) this.onPlayerReady(newIndex, data.charData);
             }
             if (data.type === 'INPUT') {
                 if (this.onInputReceived) this.onInputReceived(newIndex, data.state);
@@ -112,7 +121,18 @@ export class NetworkManager {
             if (data.type === 'STATE') {
                 if (this.onStateReceived) this.onStateReceived(data.state);
             }
+            if (data.type === 'LOBBY_INFO') {
+                if (this.onLobbyInfo) this.onLobbyInfo(data);
+            }
+            if (data.type === 'HOST_QUIT') {
+                if (this.onHostQuit) this.onHostQuit();
+            }
         });
+    }
+
+    broadcastQuit() {
+        if (!this.isHost) return;
+        this.connections.forEach(c => c.conn.send({ type: 'HOST_QUIT' }));
     }
 
     broadcastStart(config) {
@@ -130,6 +150,12 @@ export class NetworkManager {
         if (this.isHost) return; // Host applies input directly
         if (this.conn) {
             this.conn.send({ type: 'INPUT', state: inputState });
+        }
+    }
+    
+    sendReady(charData) {
+        if (this.conn) {
+            this.conn.send({ type: 'PLAYER_READY', charData });
         }
     }
 }

@@ -26,8 +26,10 @@ let isHost = true;
 let myPlayerIndex = 0;
 let clientViewMode = true; // True = Render 3D, False = Controller Only
 let worldSeed = Math.floor(Math.random() * 2147483647);
+let worldId = crypto.randomUUID();
 let saveSlot = 1;
 let currentSaveData = null;
+let autoSaveInterval = null;
 
 // --- Initialization ---
 async function init() {
@@ -68,10 +70,12 @@ async function init() {
                     infoSpan.innerText = `Exists - Seed: ${d.seed}, Items: ${d.items ? d.items.length : 0}`;
                     currentSaveData = d;
                     worldSeed = d.seed;
+                    worldId = d.worldId || crypto.randomUUID();
                 } else {
                     infoSpan.innerText = "New Game";
                     currentSaveData = null;
                     worldSeed = Math.floor(Math.random() * 2147483647);
+                    worldId = crypto.randomUUID();
                 }
             };
             slotSelect.addEventListener('change', updateSaveInfo);
@@ -87,19 +91,25 @@ async function init() {
             });
             
             // Listen for joins
-            networkManager.onPlayerJoined = (index, uuid) => {
-                const list = document.getElementById('lobby-players');
-                const badge = document.createElement('div');
-                badge.className = 'player-badge';
-                badge.innerText = `P${index + 1}`;
-                list.appendChild(badge);
-                playerCount = index + 1;
-                
-                // If we have save data for this UUID, we can prepare to restore it
-                if (currentSaveData && currentSaveData.players && uuid && currentSaveData.players[uuid]) {
-                    console.log(`Player ${index+1} recognized from save!`);
-                    // We will apply this when game starts setupPlayers
-                }
+            networkManager.onPlayerJoined = (index, uuid, conn) => {
+                // Send Lobby Info immediately so client can check saves
+                conn.send({ type: 'LOBBY_INFO', worldId: worldId, seed: worldSeed });
+            };
+
+            // Listen for Ready
+            networkManager.onPlayerReady = (index, charData) => {
+                 const list = document.getElementById('lobby-players');
+                 const badge = document.createElement('div');
+                 badge.className = 'player-badge';
+                 badge.innerText = `P${index + 1} Ready`;
+                 badge.style.borderBottom = `4px solid #44ff44`;
+                 list.appendChild(badge);
+                 playerCount = index + 1;
+                 
+                 // Store this char data for initialization
+                 if (!currentSaveData) currentSaveData = { players: {} };
+                 if (!currentSaveData.players) currentSaveData.players = {};
+                 currentSaveData.players[`p${index}`] = charData;
             };
         });
     }
@@ -118,6 +128,46 @@ async function init() {
     
     // Client listener for start
     if (!isHost) {
+        networkManager.onLobbyInfo = (data) => {
+            worldId = data.worldId;
+            worldSeed = data.seed;
+            
+            // Check for existing save
+            const localKey = `farm_char_${worldId}`;
+            const existing = localStorage.getItem(localKey);
+            
+            const container = document.getElementById('char-select-container');
+            container.innerHTML = '';
+            
+            if (existing) {
+                const charData = JSON.parse(existing);
+                container.innerHTML = `
+                    <div style="background:rgba(255,255,255,0.8); padding:15px; border-radius:10px; margin-bottom:10px;">
+                        <h4>Found Saved Character</h4>
+                        <p>Inventory: ${charData.inventory ? charData.inventory.branches : 0} branches</p>
+                        <button id="btn-use-save">Play as Saved Character</button>
+                    </div>
+                `;
+                document.getElementById('btn-use-save').onclick = () => {
+                    sendReady(charData);
+                };
+            }
+            
+            const newBtn = document.createElement('button');
+            newBtn.innerText = "Create New Character";
+            newBtn.onclick = () => {
+                // Default new char
+                sendReady({ inventory: { branches: 0 } });
+            };
+            container.appendChild(newBtn);
+        };
+
+        function sendReady(charData) {
+            document.getElementById('char-select-container').style.display = 'none';
+            document.getElementById('client-ready-msg').style.display = 'block';
+            networkManager.sendReady(charData);
+        }
+
         networkManager.onGameStart = (config) => {
             playerCount = config.playerCount;
             if (config.seed !== undefined) worldSeed = config.seed;
@@ -136,6 +186,12 @@ async function init() {
              myPlayerIndex = index;
              document.getElementById('my-player-badge').innerText = `You are P${myPlayerIndex + 1}`;
         }
+        
+        networkManager.onHostQuit = () => {
+            saveLocalChar();
+            alert("Host has disconnected. Game Saved.");
+            window.location.reload();
+        };
     }
     
     // Mode Toggle (Client only)
@@ -211,6 +267,13 @@ function setupClientUI() {
 
 function launchGame() {
     document.getElementById('start-overlay').style.display = 'none';
+    setupEscMenu();
+
+    // Auto Save
+    autoSaveInterval = setInterval(() => {
+        if (isHost) saveGame();
+        else saveLocalChar();
+    }, 5000);
 
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const audioEl = new Audio('./asset_farm_music.mp3');
@@ -413,17 +476,10 @@ function createRiggedCharacter(color) {
 function setupPlayers() {
     const colors = [0xff4444, 0x4444ff, 0x44ff44, 0xffff44, 0xff44ff]; // Red, Blue, Green, Yellow, Magenta
     
-    // Restore logic (Host only mostly, but clients simulate)
-    const savedPlayers = (isHost && currentSaveData) ? currentSaveData.players : {};
-    
-    // Find my UUID for local inventory restore on Client
-    const myUUID = !isHost ? localStorage.getItem('farm_uuid') : null;
+    // Restore logic
+    const savedPlayers = currentSaveData ? (currentSaveData.players || {}) : {};
 
     for (let i = 0; i < playerCount; i++) {
-        // Try to find if this player index matches a connected UUID that has save data
-        // For simplicity in this non-auth env, we just use defaults or memory if fresh game
-        // Ideally we map index -> uuid -> save data.
-        
         const p = {
             mesh: createRiggedCharacter(colors[i % colors.length]),
             pos: new THREE.Vector3((i - 1) * 3, 10, 0),
@@ -434,12 +490,18 @@ function setupPlayers() {
             inventory: { branches: 0 }
         };
         
-        // Host restores data if available for this slot (Mapping connection index to UUID is complex in this structure without a dedicated player manager class, 
-        // so we'll skip exact UUID restoration for P2-P5 in this snippet and focus on P1/Host or generic restore)
-        // However, we can restore Host P1:
-        if (isHost && i === 0 && savedPlayers['host']) {
-             p.inventory = savedPlayers['host'].inventory || { branches: 0 };
-             p.pos.copy(savedPlayers['host'].pos); // Restore position
+        // Restore Data
+        let pData = null;
+        if (i === 0 && isHost) pData = savedPlayers['host']; // Host local
+        else if (isHost) pData = savedPlayers[`p${i}`]; // Host looking up connected peer data
+        else if (i === myPlayerIndex) {
+            // Client local restore for self (prediction)
+            // Ideally we wait for state from host, but we can set inventory initially
+        }
+
+        if (pData) {
+            if (pData.inventory) p.inventory = pData.inventory;
+            if (pData.pos && isHost) p.pos.copy(pData.pos); // Only host sets pos authoritatively
         }
 
         scene.add(p.mesh);
@@ -828,26 +890,78 @@ function render() {
 function saveGame() {
     if (!isHost) return;
     
-    // Simple Save Structure
+    // Save all player data
+    const pData = {
+        'host': { 
+            inventory: players[0].inventory,
+            pos: players[0].pos
+        }
+    };
+    // Save connected peers (using their index as key for this session)
+    for(let i=1; i<players.length; i++) {
+        if(players[i]) {
+            pData[`p${i}`] = {
+                inventory: players[i].inventory,
+                pos: players[i].pos
+            };
+        }
+    }
+
     const data = {
+        worldId: worldId,
         seed: worldSeed,
         timestamp: Date.now(),
-        players: {
-            'host': { 
-                inventory: players[0].inventory,
-                pos: players[0].pos
-            }
-            // In a full implementation, we'd map UUIDs here
-        },
+        players: pData,
         items: terrainManager.droppedItems.map(i => ({ id: i.id, x: i.x, y: i.y, z: i.z, type: i.type })),
-        treeState: Array.from(terrainManager.treeState.entries()) // Save shaken trees
+        treeState: Array.from(terrainManager.treeState.entries())
     };
     
     localStorage.setItem(`farm_save_${saveSlot}`, JSON.stringify(data));
+    console.log("Host Saved Game");
 }
 
-// Ensure load handling for trees (needs to be injected into terrain manager on start)
-// For now, init handles checking items, we should also pass treeState if we want persistent shaken trees,
-// but simplified for this step to just Items and Player Inventory.
+function saveLocalChar() {
+    if (!players[myPlayerIndex]) return;
+    if (!worldId) return;
+
+    const data = {
+        inventory: players[myPlayerIndex].inventory,
+        timestamp: Date.now()
+    };
+    localStorage.setItem(`farm_char_${worldId}`, JSON.stringify(data));
+    console.log("Client Saved Local Char");
+}
+
+function setupEscMenu() {
+    const menu = document.getElementById('esc-menu');
+    
+    // Key Listener
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex';
+        }
+    });
+
+    document.getElementById('btn-resume').onclick = () => {
+        menu.style.display = 'none';
+    };
+    
+    document.getElementById('btn-save').onclick = () => {
+        if (isHost) saveGame();
+        else saveLocalChar();
+        alert("Game Saved!");
+        menu.style.display = 'none';
+    };
+    
+    document.getElementById('btn-quit').onclick = () => {
+        if (isHost) {
+            saveGame();
+            networkManager.broadcastQuit();
+        } else {
+            saveLocalChar();
+        }
+        window.location.reload();
+    };
+}
 
 init();
