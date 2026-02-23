@@ -58,18 +58,25 @@ export class NetworkManager {
         }
 
         const newIndex = this.connections.length + 1;
+        let playerUUID = null;
         
         conn.on('open', () => {
             console.log(`Player ${newIndex} connected`);
-            this.connections.push({ conn, index: newIndex });
+            this.connections.push({ conn, index: newIndex, uuid: null });
             
             // Tell client who they are
             conn.send({ type: 'WELCOME', index: newIndex });
-            
-            if (this.onPlayerJoined) this.onPlayerJoined(newIndex);
         });
 
         conn.on('data', (data) => {
+            if (data.type === 'HANDSHAKE') {
+                playerUUID = data.uuid;
+                // Update connection info
+                const c = this.connections.find(c => c.index === newIndex);
+                if (c) c.uuid = playerUUID;
+                
+                if (this.onPlayerJoined) this.onPlayerJoined(newIndex, playerUUID);
+            }
             if (data.type === 'INPUT') {
                 if (this.onInputReceived) this.onInputReceived(newIndex, data.state);
             }
@@ -82,10 +89,21 @@ export class NetworkManager {
     }
 
     setupClientConnection() {
+        // Generate or retrieve UUID
+        let myUUID = localStorage.getItem('farm_uuid');
+        if (!myUUID) {
+            myUUID = crypto.randomUUID();
+            localStorage.setItem('farm_uuid', myUUID);
+        }
+
         this.conn.on('data', (data) => {
             if (data.type === 'WELCOME') {
                 this.myPlayerIndex = data.index;
                 console.log("Assigned Player Index:", this.myPlayerIndex);
+                
+                // Send Handshake
+                this.conn.send({ type: 'HANDSHAKE', uuid: myUUID });
+
                 if (this.onPlayerJoined) this.onPlayerJoined(this.myPlayerIndex);
             }
             if (data.type === 'START') {

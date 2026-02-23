@@ -26,6 +26,8 @@ let isHost = true;
 let myPlayerIndex = 0;
 let clientViewMode = true; // True = Render 3D, False = Controller Only
 let worldSeed = Math.floor(Math.random() * 2147483647);
+let saveSlot = 1;
+let currentSaveData = null;
 
 // --- Initialization ---
 async function init() {
@@ -54,6 +56,27 @@ async function init() {
             document.getElementById('main-menu').style.display = 'none';
             document.getElementById('lobby-ui').style.display = 'flex';
             
+            // Save System Init
+            const slotSelect = document.getElementById('save-slot');
+            const infoSpan = document.getElementById('save-info');
+            
+            const updateSaveInfo = () => {
+                saveSlot = parseInt(slotSelect.value);
+                const dataStr = localStorage.getItem(`farm_save_${saveSlot}`);
+                if (dataStr) {
+                    const d = JSON.parse(dataStr);
+                    infoSpan.innerText = `Exists - Seed: ${d.seed}, Items: ${d.items ? d.items.length : 0}`;
+                    currentSaveData = d;
+                    worldSeed = d.seed;
+                } else {
+                    infoSpan.innerText = "New Game";
+                    currentSaveData = null;
+                    worldSeed = Math.floor(Math.random() * 2147483647);
+                }
+            };
+            slotSelect.addEventListener('change', updateSaveInfo);
+            updateSaveInfo();
+
             const id = await networkManager.initHost();
             const joinUrl = `${window.location.origin}${window.location.pathname}?join=${id}`;
             
@@ -64,14 +87,19 @@ async function init() {
             });
             
             // Listen for joins
-            networkManager.onPlayerJoined = (index) => {
+            networkManager.onPlayerJoined = (index, uuid) => {
                 const list = document.getElementById('lobby-players');
                 const badge = document.createElement('div');
                 badge.className = 'player-badge';
-                // Color mapping logic later
                 badge.innerText = `P${index + 1}`;
                 list.appendChild(badge);
                 playerCount = index + 1;
+                
+                // If we have save data for this UUID, we can prepare to restore it
+                if (currentSaveData && currentSaveData.players && uuid && currentSaveData.players[uuid]) {
+                    console.log(`Player ${index+1} recognized from save!`);
+                    // We will apply this when game starts setupPlayers
+                }
             };
         });
     }
@@ -80,8 +108,11 @@ async function init() {
     startBtn.addEventListener('click', () => {
         if (!isHost) return;
         
+        // Prepare initial state (loading items)
+        const initialItems = currentSaveData ? (currentSaveData.items || []) : [];
+        
         // Host starts game
-        networkManager.broadcastStart({ playerCount, seed: worldSeed });
+        networkManager.broadcastStart({ playerCount, seed: worldSeed, items: initialItems });
         launchGame();
     });
     
@@ -93,6 +124,11 @@ async function init() {
             myPlayerIndex = networkManager.myPlayerIndex;
             document.getElementById('my-player-badge').innerText = `You are P${myPlayerIndex + 1}`;
             launchGame();
+            
+            // Load initial items
+            if (config.items) {
+                terrainManager.syncItems(config.items);
+            }
         };
         
         networkManager.onPlayerJoined = (index) => {
@@ -247,17 +283,22 @@ function setupInputs() {
     
     if (!isHost) {
         // Client: Listen for state updates
-        networkManager.onStateReceived = (state) => {
-            // state is array of {pos, rot, animTime}
+        networkManager.onStateReceived = (packet) => {
+            // Packet contains { players: [], items: [] }
+            const pStates = packet.players;
+            
             // Update all players in the scene
             for (let i = 0; i < players.length; i++) {
-                if (state[i]) {
-                    // Smoothly lerp to host state
-                    // Simple snap for now to prevent drift, lerp in update loop if needed
-                    // Actually, let's just update target properties and let updatePlayer handle visuals
-                    // We'll store targetState in userData
-                    players[i].targetState = state[i]; 
+                if (pStates[i]) {
+                    players[i].targetState = pStates[i];
+                    // Direct sync inventory for display
+                    if (pStates[i].inventory) players[i].inventory = pStates[i].inventory;
                 }
+            }
+            
+            // Sync items
+            if (packet.items) {
+                terrainManager.syncItems(packet.items);
             }
         };
     }
@@ -273,6 +314,19 @@ function setupInputs() {
 
 function setupWorld() {
     terrainManager = new TerrainManager(scene, worldSeed);
+    
+    // Load Tree State and Items if Host
+    if (isHost && currentSaveData) {
+        if (currentSaveData.items) {
+             currentSaveData.items.forEach(i => {
+                 terrainManager.droppedItems.push(i);
+                 terrainManager.addItemMesh(i);
+             });
+        }
+        if (currentSaveData.treeState) {
+            terrainManager.treeState = new Map(currentSaveData.treeState);
+        }
+    }
 }
 
 function createRiggedCharacter(color) {
@@ -359,21 +413,46 @@ function createRiggedCharacter(color) {
 function setupPlayers() {
     const colors = [0xff4444, 0x4444ff, 0x44ff44, 0xffff44, 0xff44ff]; // Red, Blue, Green, Yellow, Magenta
     
+    // Restore logic (Host only mostly, but clients simulate)
+    const savedPlayers = (isHost && currentSaveData) ? currentSaveData.players : {};
+    
+    // Find my UUID for local inventory restore on Client
+    const myUUID = !isHost ? localStorage.getItem('farm_uuid') : null;
+
     for (let i = 0; i < playerCount; i++) {
+        // Try to find if this player index matches a connected UUID that has save data
+        // For simplicity in this non-auth env, we just use defaults or memory if fresh game
+        // Ideally we map index -> uuid -> save data.
+        
         const p = {
             mesh: createRiggedCharacter(colors[i % colors.length]),
             pos: new THREE.Vector3((i - 1) * 3, 10, 0),
             rotation: 0,
             animTime: 0,
             velY: 0,
-            isGrounded: false
+            isGrounded: false,
+            inventory: { branches: 0 }
         };
+        
+        // Host restores data if available for this slot (Mapping connection index to UUID is complex in this structure without a dedicated player manager class, 
+        // so we'll skip exact UUID restoration for P2-P5 in this snippet and focus on P1/Host or generic restore)
+        // However, we can restore Host P1:
+        if (isHost && i === 0 && savedPlayers['host']) {
+             p.inventory = savedPlayers['host'].inventory || { branches: 0 };
+             p.pos.copy(savedPlayers['host'].pos); // Restore position
+        }
+
         scene.add(p.mesh);
         players.push(p);
 
         // Camera for this player
         const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
         cameras.push(cam);
+    }
+    
+    // Enable Inventory UI
+    if (!isHost || playerCount >= 1) {
+        document.getElementById('inventory-display').style.display = 'flex';
     }
 }
 
@@ -421,6 +500,10 @@ function updatePlayer(dt, player, input) {
         
         player.velY -= gravity * dt;
         player.pos.y += player.velY * dt;
+        
+        // Resolve Collisions (Trees)
+        // Player radius approx 0.3
+        terrainManager.resolveCollision(player.pos, 0.3);
 
         // Ground Check
         const terrainHeight = terrainManager.getHeightAt(player.pos.x, player.pos.z);
@@ -437,7 +520,34 @@ function updatePlayer(dt, player, input) {
         if (input && input.actions && input.actions.a && player.isGrounded) {
             player.velY = jumpForce;
             player.isGrounded = false;
-            // Reset anim time for jump pose if we had one
+        }
+
+        // Action: Shake Tree (X button)
+        if (input && input.actions && input.actions.x) {
+            // Debounce or just check nearby
+            const tree = terrainManager.findTreeNearby(player.pos, 1.5);
+            if (tree) {
+                const drop = terrainManager.shakeTree(tree.id, {x: tree.x, z: tree.z});
+                if (drop) {
+                    // Item spawned
+                    // Animate tree shake? (Visuals handled in terrain or here)
+                }
+            }
+        }
+        
+        // Item Pickup
+        // Iterate backwards
+        for (let j = terrainManager.droppedItems.length - 1; j >= 0; j--) {
+            const item = terrainManager.droppedItems[j];
+            const dx = player.pos.x - item.x;
+            const dz = player.pos.z - item.z;
+            if (dx*dx + dz*dz < 1.0) { // Pickup radius
+                // Collect
+                terrainManager.removeitem(item.id);
+                player.inventory.branches++;
+                // Sync to this player (if not host)? We sync inventory via state maybe?
+                // Or just keep host authoritative
+            }
         }
         
         // Apply to Mesh
@@ -460,6 +570,14 @@ function updatePlayer(dt, player, input) {
         }
     }
     
+    // Sync Inventory to UI (Local Player)
+    if (players[myPlayerIndex]) {
+        const inv = players[myPlayerIndex].inventory;
+        if (inv) {
+            document.getElementById('inv-branches').innerText = inv.branches;
+        }
+    }
+
     // --- Shared Animation Logic (Visuals) ---
     // Uses player.animTime which is either calculated (Host) or synced (Client)
     const isMoving = (player.animTime > 0.1 && Math.abs(Math.sin(player.animTime)) > 0.01); // Approx check
@@ -509,14 +627,24 @@ function animate() {
         }
         
         // Broadcast State
-        const statePacket = players.map(p => ({
-            pos: p.pos,
-            rotY: p.mesh.rotation.y,
-            animTime: p.animTime
-        }));
+        const statePacket = {
+            players: players.map(p => ({
+                pos: p.pos,
+                rotY: p.mesh.rotation.y,
+                animTime: p.animTime,
+                inventory: p.inventory // Sync inventory to clients
+            })),
+            items: terrainManager.droppedItems.map(i => ({ id: i.id, x: i.x, y: i.y, z: i.z, type: i.type }))
+        };
         networkManager.broadcastState(statePacket);
         
         terrainManager.update(players.map(p => p.pos));
+        
+        // Auto Save Periodically (every 5 seconds roughly)
+        if (Math.floor(Date.now() / 1000) % 5 === 0) {
+            saveGame();
+        }
+
     } else {
         // Client Logic
         // Send Input
@@ -696,5 +824,30 @@ function render() {
     
     renderer.setScissorTest(false);
 }
+
+function saveGame() {
+    if (!isHost) return;
+    
+    // Simple Save Structure
+    const data = {
+        seed: worldSeed,
+        timestamp: Date.now(),
+        players: {
+            'host': { 
+                inventory: players[0].inventory,
+                pos: players[0].pos
+            }
+            // In a full implementation, we'd map UUIDs here
+        },
+        items: terrainManager.droppedItems.map(i => ({ id: i.id, x: i.x, y: i.y, z: i.z, type: i.type })),
+        treeState: Array.from(terrainManager.treeState.entries()) // Save shaken trees
+    };
+    
+    localStorage.setItem(`farm_save_${saveSlot}`, JSON.stringify(data));
+}
+
+// Ensure load handling for trees (needs to be injected into terrain manager on start)
+// For now, init handles checking items, we should also pass treeState if we want persistent shaken trees,
+// but simplified for this step to just Items and Player Inventory.
 
 init();
