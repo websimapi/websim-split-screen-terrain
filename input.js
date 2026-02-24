@@ -19,6 +19,11 @@ export class InputManager {
         
         // Local touch button states
         this.localButtons = { a: false, b: false, x: false, y: false };
+        
+        // Wand / Voice state
+        this.wandOrientation = { alpha: 0, beta: 0, gamma: 0, calibratedAlpha: 0 };
+        this.spellQueue = []; // Queue of spells to send
+        this.isWandActive = false;
 
         // External inputs (from network)
         this.networkInputs = new Map();
@@ -26,6 +31,70 @@ export class InputManager {
         this.initKeyboard();
         this.initGamepads();
         this.initActionButtons();
+    }
+    
+    enableWandMode() {
+        this.isWandActive = true;
+        this.initSpeech();
+        this.initMotion();
+        // Set calibration on start
+        this.wandOrientation.calibratedAlpha = this.wandOrientation.alpha || 0;
+    }
+
+    calibrateWand() {
+        // Reset "Forward" to current heading
+        this.wandOrientation.calibratedAlpha = this.wandOrientation.rawAlpha || 0;
+    }
+
+    initSpeech() {
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            console.warn("Speech API not supported");
+            return;
+        }
+        
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event) => {
+            const last = event.results.length - 1;
+            const transcript = event.results[last][0].transcript;
+            console.log("Voice Input:", transcript);
+            this.spellQueue.push(transcript);
+        };
+
+        recognition.onend = () => {
+            // Auto restart if active
+            if (this.isWandActive) {
+                try { recognition.start(); } catch(e){}
+            }
+        };
+        
+        recognition.onerror = (e) => { console.log("Speech Error", e.error); };
+
+        try { recognition.start(); } catch(e) { console.error(e); }
+    }
+
+    initMotion() {
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', (event) => {
+                // Alpha: 0-360 (Compass)
+                // Beta: -180 to 180 (Front/Back Tilt)
+                // Gamma: -90 to 90 (Left/Right Tilt)
+                
+                this.wandOrientation.rawAlpha = event.alpha;
+                
+                // Adjust alpha by calibration
+                let alpha = event.alpha - this.wandOrientation.calibratedAlpha;
+                if (alpha < 0) alpha += 360;
+                
+                this.wandOrientation.alpha = alpha; 
+                this.wandOrientation.beta = event.beta;
+                this.wandOrientation.gamma = event.gamma;
+            });
+        }
     }
 
     // Called by NetworkManager when client sends input

@@ -287,6 +287,17 @@
         <!-- Client Waiting -->
         <div id="client-wait" style="display:none;">
             <h2>Connected!</h2>
+            
+            <!-- Wand Setup -->
+            <div id="wand-setup" style="background:rgba(255,255,255,0.9); padding:20px; border-radius:15px; margin:10px;">
+                <h3>🔮 Wand Setup</h3>
+                <p>Enable Microphone and Motion Control to cast spells!</p>
+                <button id="btn-enable-wand" style="background:#9c27b0;">Enable Wand Mode</button>
+                <br><br>
+                <button id="btn-calibrate">Calibrate Forward</button>
+                <p id="wand-status" style="font-size:0.8rem; color:#666;">Inactive</p>
+            </div>
+
             <div id="char-select-container">
                 <p>Waiting for world info...</p>
             </div>

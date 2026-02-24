@@ -2,15 +2,16 @@ import * as THREE from 'three';
 import { InputManager } from './input.js';
 import { TerrainManager } from './terrain.js';
 import { NetworkManager } from './network.js';
+import { SPELL_DB, matchSpell } from './spells.js';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 
 // --- Configuration ---
 const CONFIG = {
     cameraHeight: 12, 
-    cameraOffsetZ: 18,
-    moveSpeed: 10, 
-    turnSpeed: 5,
+    cameraOffsetZ: 14,
+    moveSpeed: 8, 
+    turnSpeed: 10,
     runSpeedMultiplier: 1.5
 };
 
@@ -18,6 +19,8 @@ const CONFIG = {
 let scene, renderer;
 let rendererP5; 
 let players = [];
+let projectiles = [];
+let magicEffects = [];
 let cameras = [];
 let inputManager, terrainManager, networkManager;
 let clock;

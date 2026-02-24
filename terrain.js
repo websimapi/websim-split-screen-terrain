@@ -45,6 +45,10 @@ export class TerrainManager {
         this.treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 1.0 });
         this.treeLeavesMat = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8 });
         
+        // Physics Prop Materials
+        this.crateMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63 });
+        this.rockMat = new THREE.MeshStandardMaterial({ color: 0x757575 });
+
         // Item Materials
         this.branchMat = new THREE.MeshStandardMaterial({ color: 0x5D4037, roughness: 1.0 });
 
