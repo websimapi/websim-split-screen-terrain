@@ -376,6 +376,19 @@ function setupInputs() {
     setTimeout(() => {
         inputManager.initTouch(zoneP1, isHost ? zoneP2 : null);
     }, 100);
+
+    // Mic Button
+    const btnMic = document.getElementById('btn-mic');
+    if (btnMic) {
+        const start = (e) => { e.preventDefault(); inputManager.startListening(); btnMic.classList.add('active'); };
+        const end = (e) => { e.preventDefault(); inputManager.stopListening(); btnMic.classList.remove('active'); };
+        
+        btnMic.addEventListener('mousedown', start);
+        btnMic.addEventListener('touchstart', start);
+        btnMic.addEventListener('mouseup', end);
+        btnMic.addEventListener('touchend', end);
+        btnMic.addEventListener('mouseleave', end);
+    }
 }
 
 function setupWorld() {
@@ -524,13 +537,29 @@ function setupPlayers() {
 function updatePlayer(dt, player, input) {
     // HOST Logic (Physics)
     if (isHost) {
-        const speed = CONFIG.moveSpeed * dt;
-        const isMoving = input && (input.y !== 0 || input.x !== 0);
+        let currentSpeed = CONFIG.moveSpeed;
+        
+        // Calculate magnitude for Run
+        let magnitude = 0;
+        if (input) {
+            magnitude = Math.sqrt(input.x*input.x + input.y*input.y);
+            if (magnitude > 1.1) {
+                currentSpeed *= CONFIG.runSpeedMultiplier;
+            }
+        }
+        
+        const speed = currentSpeed * dt;
+        // Normalize input for direction if moving
+        const isMoving = magnitude > 0.1;
+        player.isMoving = isMoving; // Store for network
         
         // Horizontal Movement
         if (isMoving) {
+            const dirX = input.x / magnitude;
+            const dirY = input.y / magnitude;
+
             // Calculate target rotation based on input
-            const targetRotation = Math.atan2(input.x, input.y);
+            const targetRotation = Math.atan2(dirX, dirY);
             
             // Smooth rotation
             let rotDiff = targetRotation - player.rotation;
@@ -539,15 +568,13 @@ function updatePlayer(dt, player, input) {
             
             player.rotation += rotDiff * CONFIG.turnSpeed * dt;
             
-            // Move in direction of facing
-            // Input Y is forward(+1)/back(-1) from WASD, but nipple gives raw 1/-1.
-            // WASD: W(+1), S(-1). Nipple: Up(+1), Down(-1). 
-            // World: Forward is -Z. So +InputY should map to -Z movement.
-            player.pos.x += input.x * speed;
-            player.pos.z -= input.y * speed; 
+            // Move using direction * speed * magnitude (optional, or just const speed)
+            // Let's use constant speed if moving, modified by run multiplier
+            player.pos.x += dirX * speed;
+            player.pos.z -= dirY * speed; 
             
             // Rotate mesh to face movement (Visuals)
-            player.mesh.rotation.y = Math.atan2(input.x, -input.y); 
+            player.mesh.rotation.y = Math.atan2(dirX, -dirY); 
             
             // Advance animation time
             if (player.isGrounded) player.animTime += dt * 10;
@@ -632,6 +659,7 @@ function updatePlayer(dt, player, input) {
             
             // Sync anim time
             player.animTime = THREE.MathUtils.lerp(player.animTime, player.targetState.animTime, dt * 10);
+            player.isMoving = player.targetState.isMoving;
         }
     }
     
@@ -645,12 +673,12 @@ function updatePlayer(dt, player, input) {
 
     // --- Shared Animation Logic (Visuals) ---
     // Uses player.animTime which is either calculated (Host) or synced (Client)
-    const isMoving = (player.animTime > 0.1 && Math.abs(Math.sin(player.animTime)) > 0.01); // Approx check
+    // We rely on the authoritative isMoving flag for clean transitions
     const parts = player.mesh.userData;
     const legAmp = 0.6;
     const armAmp = 0.5;
     
-    if (isMoving) {
+    if (player.isMoving || (player.animTime > 0.1)) {
         // Simple sin wave walk cycle
         parts.legL.rotation.x = Math.sin(player.animTime) * legAmp;
         parts.legR.rotation.x = Math.sin(player.animTime + Math.PI) * legAmp;
@@ -697,7 +725,8 @@ function animate() {
                 pos: p.pos,
                 rotY: p.mesh.rotation.y,
                 animTime: p.animTime,
-                inventory: p.inventory // Sync inventory to clients
+                isMoving: p.isMoving, // Flag for animation
+                inventory: p.inventory
             })),
             items: terrainManager.droppedItems.map(i => ({ id: i.id, x: i.x, y: i.y, z: i.z, type: i.type }))
         };

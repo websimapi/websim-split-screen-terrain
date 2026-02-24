@@ -53,28 +53,31 @@ export class InputManager {
         }
         
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US';
+        this.recognition = new SpeechRecognition();
+        this.recognition.continuous = false; // Single shot for button press
+        this.recognition.interimResults = false;
+        this.recognition.lang = 'en-US';
 
-        recognition.onresult = (event) => {
+        this.recognition.onresult = (event) => {
             const last = event.results.length - 1;
             const transcript = event.results[last][0].transcript;
             console.log("Voice Input:", transcript);
             this.spellQueue.push(transcript);
         };
 
-        recognition.onend = () => {
-            // Auto restart if active
-            if (this.isWandActive) {
-                try { recognition.start(); } catch(e){}
-            }
-        };
-        
-        recognition.onerror = (e) => { console.log("Speech Error", e.error); };
+        this.recognition.onerror = (e) => { console.log("Speech Error", e.error); };
+    }
 
-        try { recognition.start(); } catch(e) { console.error(e); }
+    startListening() {
+        if (this.recognition) {
+            try { this.recognition.start(); console.log("Listening..."); } catch(e) { /* ignore already started */ }
+        }
+    }
+
+    stopListening() {
+        if (this.recognition) {
+            try { this.recognition.stop(); console.log("Stopped Listening."); } catch(e) {}
+        }
     }
 
     initMotion() {
@@ -120,26 +123,34 @@ export class InputManager {
     }
 
     initTouch(zone1, zone2) {
+        // Helper to extract vector scaled by force
+        const handleMove = (data) => {
+            if (data && data.vector) {
+                // Apply force scale. nipplejs force is ~1.0 at edge, can go higher if dragged past.
+                // We clamp at 1.5 to allow for "run" threshold
+                const force = Math.min(data.force, 2.0); 
+                return { x: data.vector.x * force, y: data.vector.y * force };
+            }
+            return { x: 0, y: 0 };
+        };
+
         // Host logic for split screen touch (P1 and P2)
         if (this.isHost) {
             if (zone1) {
                 const m1 = nipplejs.create({ zone: zone1, mode: 'static', position: { left: '50%', top: '50%' }, color: 'red', size: 100 });
-                m1.on('move', (evt, data) => { if (data && data.vector) this.joysticks[0] = { x: data.vector.x, y: data.vector.y }; });
+                m1.on('move', (evt, data) => { this.joysticks[0] = handleMove(data); });
                 m1.on('end', () => { this.joysticks[0] = null; });
             }
             if (zone2) {
                 const m2 = nipplejs.create({ zone: zone2, mode: 'static', position: { left: '50%', top: '50%' }, color: 'blue', size: 100 });
-                m2.on('move', (evt, data) => { if (data && data.vector) this.joysticks[1] = { x: data.vector.x, y: data.vector.y }; });
+                m2.on('move', (evt, data) => { this.joysticks[1] = handleMove(data); });
                 m2.on('end', () => { this.joysticks[1] = null; });
             }
         } else {
             // Client logic - always map zone1 to localPlayerIndex
-            // Clients only have one touch zone active usually (full screen)
             if (zone1) {
                 const m1 = nipplejs.create({ zone: zone1, mode: 'static', position: { left: '50%', top: '50%' }, color: 'white', size: 100 });
-                m1.on('move', (evt, data) => { 
-                    if (data && data.vector) this.joysticks[this.localPlayerIndex] = { x: data.vector.x, y: data.vector.y }; 
-                });
+                m1.on('move', (evt, data) => { this.joysticks[this.localPlayerIndex] = handleMove(data); });
                 m1.on('end', () => { this.joysticks[this.localPlayerIndex] = null; });
             }
         }
@@ -259,9 +270,15 @@ export class InputManager {
                 }
             }
 
-            // Normalize movement
+            // Normalize movement - but allow running (magnitude > 1)
+            // Keyboard is always 1. Joystick can be > 1.
+            
+            // Just clamp to 1.5 to prevent infinite speed
             const norm = Math.sqrt(p.x*p.x + p.y*p.y);
-            if (norm > 1) { p.x /= norm; p.y /= norm; }
+            if (norm > 1.5) { 
+                p.x = (p.x / norm) * 1.5; 
+                p.y = (p.y / norm) * 1.5; 
+            }
             
             this.state[i] = { x: p.x, y: p.y, actions: acts };
         }
