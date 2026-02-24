@@ -414,13 +414,23 @@ function setupInputs() {
     // Mic Button
     const btnMic = document.getElementById('btn-mic');
     if (btnMic) {
-        const start = (e) => { e.preventDefault(); inputManager.startListening(); btnMic.classList.add('active'); };
-        const end = (e) => { e.preventDefault(); inputManager.stopListening(); btnMic.classList.remove('active'); };
+        const start = (e) => { 
+            e.preventDefault(); 
+            console.log("Mic start");
+            inputManager.startListening(); 
+            btnMic.classList.add('active'); 
+        };
+        const end = (e) => { 
+            e.preventDefault(); 
+            console.log("Mic stop");
+            inputManager.stopListening(); 
+            btnMic.classList.remove('active'); 
+        };
         
         btnMic.addEventListener('mousedown', start);
-        btnMic.addEventListener('touchstart', start);
+        btnMic.addEventListener('touchstart', start, { passive: false });
         btnMic.addEventListener('mouseup', end);
-        btnMic.addEventListener('touchend', end);
+        btnMic.addEventListener('touchend', end, { passive: false });
         btnMic.addEventListener('mouseleave', end);
     }
 }

@@ -31,11 +31,11 @@ export class InputManager {
         this.initKeyboard();
         this.initGamepads();
         this.initActionButtons();
+        this.initSpeech();
     }
     
     enableWandMode() {
         this.isWandActive = true;
-        this.initSpeech();
         this.initMotion();
         // Set calibration on start
         this.wandOrientation.calibratedAlpha = this.wandOrientation.alpha || 0;
@@ -54,50 +54,86 @@ export class InputManager {
         
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         this.recognition = new SpeechRecognition();
-        this.recognition.continuous = false; // Single shot for button press
+        this.recognition.continuous = true; 
         this.recognition.interimResults = false;
         this.recognition.lang = 'en-US';
+        this.isListening = false;
 
-        this.recognition.onresult = (event) => {
-            const last = event.results.length - 1;
-            const transcript = event.results[last][0].transcript;
-            console.log("Voice Input:", transcript);
-            // Push to queue to be picked up by Main loop
-            this.spellQueue.push(transcript);
+        this.recognition.onstart = () => {
+            console.log("Speech recognition started");
+            this.isListening = true;
         };
 
-        this.recognition.onerror = (e) => { console.log("Speech Error", e.error); };
+        this.recognition.onend = () => {
+            console.log("Speech recognition ended");
+            this.isListening = false;
+        };
+
+        this.recognition.onresult = (event) => {
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    const transcript = event.results[i][0].transcript.trim();
+                    console.log("Voice Input:", transcript);
+                    this.spellQueue.push(transcript);
+                }
+            }
+        };
+
+        this.recognition.onerror = (e) => { 
+            console.error("Speech Error", e.error);
+            // Ignore no-speech errors which happen often
+            if (e.error === 'no-speech') return; 
+            
+            if (e.error === 'not-allowed') {
+                alert("Microphone access blocked. Please check browser permissions.");
+            }
+        };
     }
 
     startListening() {
-        if (this.recognition) {
-            try { this.recognition.start(); console.log("Listening..."); } catch(e) { /* ignore already started */ }
+        if (this.recognition && !this.isListening) {
+            try { 
+                this.recognition.start(); 
+            } catch(e) { 
+                console.error("Start error:", e); 
+            }
         }
     }
 
     stopListening() {
-        if (this.recognition) {
-            try { this.recognition.stop(); console.log("Stopped Listening."); } catch(e) {}
+        if (this.recognition && this.isListening) {
+            try { 
+                this.recognition.stop(); 
+            } catch(e) { 
+                console.error("Stop error:", e); 
+            }
         }
     }
 
     initMotion() {
+        const handleOrientation = (event) => {
+            this.wandOrientation.rawAlpha = event.alpha;
+            let alpha = event.alpha - this.wandOrientation.calibratedAlpha;
+            if (alpha < 0) alpha += 360;
+            this.wandOrientation.alpha = alpha; 
+            this.wandOrientation.beta = event.beta;
+            this.wandOrientation.gamma = event.gamma;
+        };
+
         if (window.DeviceOrientationEvent) {
-            window.addEventListener('deviceorientation', (event) => {
-                // Alpha: 0-360 (Compass)
-                // Beta: -180 to 180 (Front/Back Tilt)
-                // Gamma: -90 to 90 (Left/Right Tilt)
-                
-                this.wandOrientation.rawAlpha = event.alpha;
-                
-                // Adjust alpha by calibration
-                let alpha = event.alpha - this.wandOrientation.calibratedAlpha;
-                if (alpha < 0) alpha += 360;
-                
-                this.wandOrientation.alpha = alpha; 
-                this.wandOrientation.beta = event.beta;
-                this.wandOrientation.gamma = event.gamma;
-            });
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        } else {
+                            console.warn("Device Motion permission denied");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
         }
     }
 
