@@ -228,6 +228,65 @@
         #btn-b { background-color: rgba(244, 67, 54, 0.6); }
         #btn-x { background-color: rgba(33, 150, 243, 0.6); }
         #btn-y { background-color: rgba(255, 193, 7, 0.6); }
+
+        #spellbook {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 500px;
+            height: 70%;
+            background: #3e2723; /* Dark wood */
+            border: 8px solid #d7ccc8;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            z-index: 300;
+            flex-direction: column;
+            color: #d7ccc8;
+            font-family: 'Times New Roman', serif;
+            padding: 20px;
+            overflow: hidden;
+        }
+        #spellbook h2 {
+            text-align: center;
+            border-bottom: 2px solid #8d6e63;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        #spell-list {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .spell-entry {
+            background: rgba(0,0,0,0.2);
+            margin-bottom: 8px;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #5d4037;
+        }
+        .spell-entry.unknown {
+            opacity: 0.5;
+            font-style: italic;
+        }
+        .spell-name {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ffb74d;
+        }
+        .spell-desc {
+            font-size: 0.9rem;
+            color: #bdbdbd;
+        }
+        #btn-close-book {
+            align-self: center;
+            margin-top: 10px;
+            background: #5d4037;
+            border: 2px solid #8d6e63;
+            font-family: inherit;
+        }
     </style>
     <script type="importmap">
     {
@@ -317,6 +376,15 @@
             <button id="btn-save">Save Game</button>
             <button id="btn-quit" style="background:#ff4444; border-color:#ffaaaa;">Save & Quit</button>
         </div>
+    </div>
+
+    <!-- Spellbook -->
+    <div id="spellbook">
+        <h2>Grimoire</h2>
+        <div id="spell-list">
+            <!-- Populated by JS -->
+        </div>
+        <button id="btn-close-book">Close</button>
     </div>
 
     <button id="view-toggle" class="mode-toggle">Switch to Controller Mode</button>

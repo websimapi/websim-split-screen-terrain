@@ -13,6 +13,7 @@ export class NetworkManager {
         this.onGameStart = null;
         this.onInputReceived = null;
         this.onStateReceived = null;
+        this.onVoiceReceived = null;
     }
 
     initHost() {
@@ -89,6 +90,9 @@ export class NetworkManager {
             if (data.type === 'INPUT') {
                 if (this.onInputReceived) this.onInputReceived(newIndex, data.state);
             }
+            if (data.type === 'VOICE') {
+                if (this.onVoiceReceived) this.onVoiceReceived(newIndex, data.text);
+            }
         });
 
         conn.on('close', () => {
@@ -150,6 +154,12 @@ export class NetworkManager {
         if (this.isHost) return; // Host applies input directly
         if (this.conn) {
             this.conn.send({ type: 'INPUT', state: inputState });
+        }
+    }
+
+    sendVoice(text) {
+        if (this.conn) {
+            this.conn.send({ type: 'VOICE', text });
         }
     }
     

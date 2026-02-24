@@ -62,6 +62,7 @@ export class InputManager {
             const last = event.results.length - 1;
             const transcript = event.results[last][0].transcript;
             console.log("Voice Input:", transcript);
+            // Push to queue to be picked up by Main loop
             this.spellQueue.push(transcript);
         };
 
@@ -149,7 +150,14 @@ export class InputManager {
         } else {
             // Client logic - always map zone1 to localPlayerIndex
             if (zone1) {
-                const m1 = nipplejs.create({ zone: zone1, mode: 'static', position: { left: '50%', top: '50%' }, color: 'white', size: 100 });
+                // Joystick at Bottom Left
+                const m1 = nipplejs.create({ 
+                    zone: zone1, 
+                    mode: 'static', 
+                    position: { left: '80px', bottom: '80px' }, 
+                    color: 'white', 
+                    size: 100 
+                });
                 m1.on('move', (evt, data) => { this.joysticks[this.localPlayerIndex] = handleMove(data); });
                 m1.on('end', () => { this.joysticks[this.localPlayerIndex] = null; });
             }

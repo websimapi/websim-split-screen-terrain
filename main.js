@@ -34,6 +34,37 @@ let saveSlot = 1;
 let currentSaveData = null;
 let autoSaveInterval = null;
 
+// Speech Bubble Helper
+function createTextSprite(message) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 512;
+    canvas.height = 256;
+    
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+    ctx.lineWidth = 10;
+    
+    // Bubble shape
+    ctx.beginPath();
+    ctx.roundRect(20, 20, 472, 216, 50);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = "Bold 60px Arial";
+    ctx.fillStyle = "black";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(message, 256, 128);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(4, 2, 1);
+    sprite.position.set(0, 2.5, 0);
+    return sprite;
+}
+
 // --- Initialization ---
 async function init() {
     networkManager = new NetworkManager();
@@ -345,6 +376,9 @@ function setupInputs() {
         networkManager.onInputReceived = (index, state) => {
             inputManager.setNetworkInput(index, state);
         };
+        networkManager.onVoiceReceived = (index, text) => {
+            handleVoiceInput(index, text);
+        };
     }
     
     if (!isHost) {
@@ -491,7 +525,8 @@ function createRiggedCharacter(color) {
 
 function setupPlayers() {
     const colors = [0xff4444, 0x4444ff, 0x44ff44, 0xffff44, 0xff44ff]; // Red, Blue, Green, Yellow, Magenta
-    
+    const defaultSpells = ["Accio", "Lumos", "Wingardium Leviosa"];
+
     // Restore logic
     const savedPlayers = currentSaveData ? (currentSaveData.players || {}) : {};
 
@@ -503,7 +538,10 @@ function setupPlayers() {
             animTime: 0,
             velY: 0,
             isGrounded: false,
-            inventory: { branches: 0 }
+            inventory: { branches: 0 },
+            knownSpells: [...defaultSpells],
+            speechBubble: null,
+            speechTimer: 0
         };
         
         // Restore Data
@@ -517,6 +555,7 @@ function setupPlayers() {
 
         if (pData) {
             if (pData.inventory) p.inventory = pData.inventory;
+            if (pData.knownSpells) p.knownSpells = pData.knownSpells;
             if (pData.pos && isHost) p.pos.copy(pData.pos); // Only host sets pos authoritatively
         }
 
@@ -532,11 +571,97 @@ function setupPlayers() {
     if (!isHost || playerCount >= 1) {
         document.getElementById('inventory-display').style.display = 'flex';
     }
+    
+    // Setup Spellbook UI Actions
+    document.getElementById('btn-close-book').onclick = () => {
+        document.getElementById('spellbook').style.display = 'none';
+    };
+}
+
+function handleVoiceInput(index, text) {
+    if (!players[index]) return;
+    
+    const p = players[index];
+    
+    // 1. Show Speech Bubble (for everyone via state sync later, but local visual update now)
+    updateSpeechBubble(p, text);
+    
+    // 2. Check for Spell Match
+    const spell = matchSpell(text);
+    if (spell) {
+        // Unlock Spell if new
+        const known = p.knownSpells.find(s => s.toLowerCase() === spell.name.toLowerCase());
+        if (!known) {
+            p.knownSpells.push(spell.name);
+            console.log(`Player ${index} learned ${spell.name}!`);
+            updateSpeechBubble(p, `${text} (Learned!)`);
+        }
+        
+        // Trigger Spell Effect (TODO: Add particle effects)
+        console.log(`Player ${index} cast ${spell.name}`);
+    }
+}
+
+function updateSpeechBubble(player, text) {
+    if (player.speechBubble) {
+        player.mesh.remove(player.speechBubble);
+        if (player.speechBubble.material.map) player.speechBubble.material.map.dispose();
+        player.speechBubble.material.dispose();
+    }
+    
+    player.lastText = text; // Store for network sync
+    
+    const bubble = createTextSprite(text);
+    player.mesh.add(bubble);
+    player.speechBubble = bubble;
+    player.speechTimer = 3.0; // Show for 3 seconds
+}
+
+function updateSpellbookUI(knownSpells) {
+    const list = document.getElementById('spell-list');
+    list.innerHTML = '';
+    
+    SPELL_DB.spells.forEach(spell => {
+        const isKnown = knownSpells.includes(spell.name);
+        
+        const el = document.createElement('div');
+        el.className = `spell-entry ${isKnown ? 'known' : 'unknown'}`;
+        
+        const name = document.createElement('div');
+        name.className = 'spell-name';
+        name.innerText = isKnown ? spell.name : '???';
+        
+        const desc = document.createElement('div');
+        desc.className = 'spell-desc';
+        desc.innerText = isKnown ? spell.effect : 'Unknown spell. Speak to unlock.';
+        
+        el.appendChild(name);
+        el.appendChild(desc);
+        list.appendChild(el);
+    });
 }
 
 function updatePlayer(dt, player, input) {
+    // Update Speech Bubble Timer
+    if (player.speechTimer > 0) {
+        player.speechTimer -= dt;
+        if (player.speechTimer <= 0 && player.speechBubble) {
+            player.mesh.remove(player.speechBubble);
+            player.speechBubble = null;
+        }
+    }
+
     // HOST Logic (Physics)
     if (isHost) {
+        // Process Host Voice (Host plays as P0)
+        // inputManager.spellQueue is populated by microphone
+        if (player === players[0] && inputManager.spellQueue.length > 0) {
+            while(inputManager.spellQueue.length > 0) {
+                const txt = inputManager.spellQueue.shift();
+                handleVoiceInput(0, txt);
+            }
+        }
+
         let currentSpeed = CONFIG.moveSpeed;
         
         // Calculate magnitude for Run
@@ -626,6 +751,18 @@ function updatePlayer(dt, player, input) {
                 }
             }
         }
+
+        // Action: Spellbook (Y Button) - Host
+        if (input && input.actions && input.actions.y) {
+             const sb = document.getElementById('spellbook');
+             // Simple toggle logic (checking display style is naive but works for single user view)
+             // For split screen, we only show for the local user viewing the screen.
+             // Since Host is P1, we show it on the main screen.
+             if (sb.style.display === 'none' || !sb.style.display) {
+                 updateSpellbookUI(player.knownSpells);
+                 sb.style.display = 'flex';
+             }
+        }
         
         // Item Pickup
         // Iterate backwards
@@ -660,6 +797,40 @@ function updatePlayer(dt, player, input) {
             // Sync anim time
             player.animTime = THREE.MathUtils.lerp(player.animTime, player.targetState.animTime, dt * 10);
             player.isMoving = player.targetState.isMoving;
+
+            // Sync Inventory & Spells
+            player.inventory = player.targetState.inventory;
+            player.knownSpells = player.targetState.knownSpells;
+            
+            // Sync Speech Bubble (if passed in state - OR - we rely on events)
+            // For now, simpler to check if text changed in state, but we used events for voice matching.
+            // Let's rely on `handleVoiceInput` visual for local, but Host needs to broadcast speech text for everyone to see.
+            // See "Broadcast State" section below.
+            
+            // Actually, we should check `lastSpeech` from state to show bubble
+            if (player.targetState.lastSpeech && player.targetState.lastSpeech !== player.lastSyncedSpeech) {
+                updateSpeechBubble(player, player.targetState.lastSpeech);
+                player.lastSyncedSpeech = player.targetState.lastSpeech;
+            }
+        }
+
+        // Send Voice Queue
+        while (inputManager.spellQueue.length > 0) {
+            const txt = inputManager.spellQueue.shift();
+            // Show locally immediately for responsiveness
+            updateSpeechBubble(players[myPlayerIndex], txt); 
+            // Send to host
+            networkManager.sendVoice(txt);
+        }
+        
+        // Client Spellbook Toggle
+        const myInput = inputManager.getLocalState(); // Just to check Y button locally
+        if (myInput && myInput.actions && myInput.actions.y) {
+             const sb = document.getElementById('spellbook');
+             if (sb.style.display === 'none' || !sb.style.display) {
+                 updateSpellbookUI(players[myPlayerIndex].knownSpells || []);
+                 sb.style.display = 'flex';
+             }
         }
     }
     
@@ -725,11 +896,35 @@ function animate() {
                 pos: p.pos,
                 rotY: p.mesh.rotation.y,
                 animTime: p.animTime,
-                isMoving: p.isMoving, // Flag for animation
-                inventory: p.inventory
+                isMoving: p.isMoving, 
+                inventory: p.inventory,
+                knownSpells: p.knownSpells,
+                // Send current speech text if active so clients can see it
+                lastSpeech: p.speechBubble ? p.speechBubble.material.map.source.data.textContent : null // Hacky, better to store text on player
             })),
             items: terrainManager.droppedItems.map(i => ({ id: i.id, x: i.x, y: i.y, z: i.z, type: i.type }))
         };
+        
+        // Store text on player object for the hack above to work cleaner
+        players.forEach(p => {
+             // If speech timer active, send the text, otherwise null
+             if (p.speechTimer > 0 && p.lastText) {
+                 // We need to inject this into the packet we just made...
+                 // Or just modify the map above. Let's fix updateSpeechBubble to store text.
+             }
+        });
+        
+        // Redoing the map to include lastSpeech correctly
+        statePacket.players = players.map(p => ({
+            pos: p.pos,
+            rotY: p.mesh.rotation.y,
+            animTime: p.animTime,
+            isMoving: p.isMoving,
+            inventory: p.inventory,
+            knownSpells: p.knownSpells,
+            lastSpeech: (p.speechTimer > 0) ? p.lastText : null 
+        }));
+
         networkManager.broadcastState(statePacket);
         
         terrainManager.update(players.map(p => p.pos));
@@ -926,6 +1121,7 @@ function saveGame() {
     const pData = {
         'host': { 
             inventory: players[0].inventory,
+            knownSpells: players[0].knownSpells,
             pos: players[0].pos
         }
     };
@@ -934,6 +1130,7 @@ function saveGame() {
         if(players[i]) {
             pData[`p${i}`] = {
                 inventory: players[i].inventory,
+                knownSpells: players[i].knownSpells,
                 pos: players[i].pos
             };
         }
