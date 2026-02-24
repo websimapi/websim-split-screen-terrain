@@ -2,7 +2,7 @@ export const SPELL_DB = {
   "spells": [
     {
       "name": "Accio",
-      "pronunciation_accepted": ["AK-ee-oh", "ak-see-oh", "accio", "a key oh"],
+      "pronunciation_accepted": ["AK-ee-oh", "ak-see-oh", "accio", "a key oh", "akio", "ack-ee-oh"],
       "type": "utility",
       "color": 0xaaaaaa,
       "effect": "pull"

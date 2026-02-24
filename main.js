@@ -12,11 +12,14 @@ const CONFIG = {
     cameraOffsetZ: 14,
     moveSpeed: 8, 
     turnSpeed: 10,
-    runSpeedMultiplier: 1.5
+    runSpeedMultiplier: 1.5,
+    dayDuration: 1440 // 24 minutes in seconds
 };
 
 // --- Globals ---
 let scene, renderer;
+let sunLight, hemiLight;
+let gameTime = 0; // 0 to CONFIG.dayDuration
 let rendererP5; 
 let players = [];
 let projectiles = [];
@@ -179,6 +182,7 @@ async function init() {
                     <div style="background:rgba(255,255,255,0.8); padding:15px; border-radius:10px; margin-bottom:10px;">
                         <h4>Found Saved Character</h4>
                         <p>Inventory: ${charData.inventory ? charData.inventory.branches : 0} branches</p>
+                        <p>Spells: ${charData.knownSpells ? charData.knownSpells.length : 3}</p>
                         <button id="btn-use-save">Play as Saved Character</button>
                     </div>
                 `;
@@ -351,19 +355,23 @@ function setupThreeJS() {
         rendererP5.outputColorSpace = THREE.SRGBColorSpace;
     }
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // Lighting - Dynamic Day/Night
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.1); 
     scene.add(ambientLight);
     
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+    hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.2);
     scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffee, 1.2);
-    dirLight.position.set(50, 100, 50);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
-    scene.add(dirLight);
+    sunLight = new THREE.DirectionalLight(0xffffee, 1.0);
+    sunLight.position.set(50, 100, 50);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.left = -50;
+    sunLight.shadow.camera.right = 50;
+    sunLight.shadow.camera.top = 50;
+    sunLight.shadow.camera.bottom = -50;
+    scene.add(sunLight);
 
     clock = new THREE.Clock();
 }
@@ -399,6 +407,9 @@ function setupInputs() {
             // Sync items
             if (packet.items) {
                 terrainManager.syncItems(packet.items);
+            }
+            if (packet.time !== undefined) {
+                 gameTime = packet.time;
             }
         };
     }
@@ -550,9 +561,17 @@ function setupPlayers() {
             isGrounded: false,
             inventory: { branches: 0 },
             knownSpells: [...defaultSpells],
+            spellStats: {}, 
+            lumosActive: false,
             speechBubble: null,
             speechTimer: 0
         };
+
+        // Add Lumos Light
+        const light = new THREE.PointLight(0xffffee, 0, 15);
+        light.position.set(0.4, 0.5, 0.2); // Near right hand
+        p.mesh.add(light);
+        p.lumosLight = light;
         
         // Restore Data
         let pData = null;
@@ -566,8 +585,14 @@ function setupPlayers() {
         if (pData) {
             if (pData.inventory) p.inventory = pData.inventory;
             if (pData.knownSpells) p.knownSpells = pData.knownSpells;
+            if (pData.spellStats) p.spellStats = pData.spellStats;
             if (pData.pos && isHost) p.pos.copy(pData.pos); // Only host sets pos authoritatively
         }
+
+        // Initialize spell stats for known spells if missing
+        p.knownSpells.forEach(s => {
+            if (!p.spellStats[s]) p.spellStats[s] = { level: 1, xp: 0 };
+        });
 
         scene.add(p.mesh);
         players.push(p);
@@ -593,22 +618,37 @@ function handleVoiceInput(index, text) {
     
     const p = players[index];
     
-    // 1. Show Speech Bubble (for everyone via state sync later, but local visual update now)
+    // 1. Show Speech Bubble
     updateSpeechBubble(p, text);
     
     // 2. Check for Spell Match
     const spell = matchSpell(text);
     if (spell) {
         // Unlock Spell if new
-        const known = p.knownSpells.find(s => s.toLowerCase() === spell.name.toLowerCase());
-        if (!known) {
+        if (!p.knownSpells.includes(spell.name)) {
             p.knownSpells.push(spell.name);
-            console.log(`Player ${index} learned ${spell.name}!`);
+            p.spellStats[spell.name] = { level: 1, xp: 0 };
             updateSpeechBubble(p, `${text} (Learned!)`);
         }
         
-        // Trigger Spell Effect (TODO: Add particle effects)
-        console.log(`Player ${index} cast ${spell.name}`);
+        // XP System
+        if (!p.spellStats[spell.name]) p.spellStats[spell.name] = { level: 1, xp: 0 };
+        const stats = p.spellStats[spell.name];
+        stats.xp += 10;
+        if (stats.xp >= stats.level * 100) {
+            stats.level++;
+            stats.xp = 0;
+            updateSpeechBubble(p, `${spell.name} Level Up! (${stats.level})`);
+        }
+
+        // Specific Logic
+        if (spell.name === "Lumos") {
+            p.lumosActive = true;
+        } else if (spell.name === "Nox") {
+            p.lumosActive = false;
+        } else {
+             console.log(`Player ${index} cast ${spell.name} (Lvl ${stats.level})`);
+        }
     }
 }
 
@@ -811,6 +851,8 @@ function updatePlayer(dt, player, input) {
             // Sync Inventory & Spells
             player.inventory = player.targetState.inventory;
             player.knownSpells = player.targetState.knownSpells;
+            player.spellStats = player.targetState.spellStats;
+            player.lumosActive = player.targetState.lumosActive;
             
             // Sync Speech Bubble (if passed in state - OR - we rely on events)
             // For now, simpler to check if text changed in state, but we used events for voice matching.
@@ -852,6 +894,16 @@ function updatePlayer(dt, player, input) {
         }
     }
 
+    // --- Lumos Visual Update ---
+    if (player.lumosLight) {
+        const stats = player.spellStats && player.spellStats['Lumos'] ? player.spellStats['Lumos'] : { level: 1 };
+        const targetIntensity = player.lumosActive ? (1 + stats.level * 0.5) : 0;
+        const targetDist = player.lumosActive ? (15 + stats.level * 2) : 0;
+        
+        player.lumosLight.intensity = THREE.MathUtils.lerp(player.lumosLight.intensity, targetIntensity, dt * 5);
+        player.lumosLight.distance = targetDist;
+    }
+
     // --- Shared Animation Logic (Visuals) ---
     // Uses player.animTime which is either calculated (Host) or synced (Client)
     // We rely on the authoritative isMoving flag for clean transitions
@@ -890,9 +942,54 @@ function updateCameras() {
     }
 }
 
+function updateDayNightCycle(dt) {
+    if (!sunLight || !scene) return;
+    
+    gameTime += dt;
+    if (gameTime > CONFIG.dayDuration) gameTime -= CONFIG.dayDuration;
+    
+    // Cycle 0..1
+    const cycle = gameTime / CONFIG.dayDuration;
+    
+    // Sun Angle (0 = Rise, 0.5 = Set)
+    const angle = (cycle - 0.25) * Math.PI * 2;
+    
+    const r = 100;
+    sunLight.position.x = Math.cos(angle) * r;
+    sunLight.position.y = Math.sin(angle) * r;
+    sunLight.position.z = 50; 
+    
+    const sunHeight = Math.sin(angle);
+    
+    let skyColor;
+    let lightInt;
+    
+    if (sunHeight > 0.1) {
+        // Day
+        skyColor = new THREE.Color(0x87CEEB);
+        lightInt = 1.0;
+    } else if (sunHeight < -0.1) {
+        // Night
+        skyColor = new THREE.Color(0x0a0a20);
+        lightInt = 0.05;
+    } else {
+        // Transition
+        const t = (sunHeight + 0.1) / 0.2; 
+        skyColor = new THREE.Color(0x0a0a20).lerp(new THREE.Color(0x87CEEB), t);
+        lightInt = 0.05 + t * 0.95;
+    }
+    
+    scene.background = skyColor;
+    if(scene.fog) scene.fog.color = skyColor;
+    sunLight.intensity = lightInt;
+    if(hemiLight) hemiLight.intensity = lightInt * 0.5;
+}
+
 function animate() {
     const dt = clock.getDelta();
     inputManager.update();
+    
+    updateDayNightCycle(dt);
 
     if (isHost) {
         // Process Game Logic
@@ -909,10 +1006,13 @@ function animate() {
                 isMoving: p.isMoving, 
                 inventory: p.inventory,
                 knownSpells: p.knownSpells,
+                spellStats: p.spellStats,
+                lumosActive: p.lumosActive,
                 // Send current speech text if active so clients can see it
-                lastSpeech: p.speechBubble ? p.speechBubble.material.map.source.data.textContent : null // Hacky, better to store text on player
+                lastSpeech: p.speechBubble ? p.speechBubble.material.map.source.data.textContent : null 
             })),
-            items: terrainManager.droppedItems.map(i => ({ id: i.id, x: i.x, y: i.y, z: i.z, type: i.type }))
+            items: terrainManager.droppedItems.map(i => ({ id: i.id, x: i.x, y: i.y, z: i.z, type: i.type })),
+            time: gameTime
         };
         
         // Store text on player object for the hack above to work cleaner
@@ -932,6 +1032,8 @@ function animate() {
             isMoving: p.isMoving,
             inventory: p.inventory,
             knownSpells: p.knownSpells,
+            spellStats: p.spellStats,
+            lumosActive: p.lumosActive,
             lastSpeech: (p.speechTimer > 0) ? p.lastText : null 
         }));
 
@@ -1132,6 +1234,7 @@ function saveGame() {
         'host': { 
             inventory: players[0].inventory,
             knownSpells: players[0].knownSpells,
+            spellStats: players[0].spellStats,
             pos: players[0].pos
         }
     };
@@ -1141,6 +1244,7 @@ function saveGame() {
             pData[`p${i}`] = {
                 inventory: players[i].inventory,
                 knownSpells: players[i].knownSpells,
+                spellStats: players[i].spellStats,
                 pos: players[i].pos
             };
         }
@@ -1165,6 +1269,8 @@ function saveLocalChar() {
 
     const data = {
         inventory: players[myPlayerIndex].inventory,
+        knownSpells: players[myPlayerIndex].knownSpells,
+        spellStats: players[myPlayerIndex].spellStats,
         timestamp: Date.now()
     };
     localStorage.setItem(`farm_char_${worldId}`, JSON.stringify(data));
